@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """TeleBot Builder - painel Flask multi-cliente (contas + Postgres) para criar e gerenciar bots do Telegram."""
 import asyncio, json, os, re, threading, time, uuid, urllib.request, urllib.error
+import httpx  # importar aqui (thread principal) evita erro de módulo parcialmente inicializado quando vários bots sobem ao mesmo tempo
 from functools import wraps
 from pathlib import Path
 import psycopg2
@@ -637,6 +638,7 @@ for _uid, _bots in all_accounts():
     for _b in _bots:
         if _b.get("enabled"):
             start_worker(_uid, _b["id"])
+            time.sleep(0.3)
 
 if __name__ == "__main__":
     host = os.environ.get("HOST", "127.0.0.1")
