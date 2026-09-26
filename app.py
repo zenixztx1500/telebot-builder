@@ -1,36 +1,61 @@
 # -*- coding: utf-8 -*-
-"""TeleBot Builder - painel Flask para criar e gerenciar bots do Telegram."""
+"""TeleBot Builder - painel Flask multi-cliente (contas + Postgres) para criar e gerenciar bots do Telegram."""
 import asyncio, json, os, re, threading, time, uuid, urllib.request, urllib.error
+from functools import wraps
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_from_directory
+import psycopg2
+import psycopg2.extras
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for
 from telegram import (Update, BotCommand, InlineKeyboardButton,
                       InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton)
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           CallbackQueryHandler, filters)
 
 BASE = Path(__file__).parent
-DB = BASE / "data" / "bots.json"
 LOG_DIR = BASE / "data" / "logs"
 IMG_DIR = BASE / "data" / "images"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 LOCK = threading.RLock()
-if not DB.exists():
-    DB.write_text('{"bots": []}', encoding="utf-8")
 
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 EDITABLE = ("name", "commands", "auto_replies", "inline_keyboards", "reply_keyboard",
             "banned_words", "admin_only", "whitelist", "enabled", "products", "payment")
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
-def load():
-    with LOCK:
-        return json.loads(DB.read_text(encoding="utf-8"))
+# ---------------- Banco de dados (uma conta por cliente; bots ficam num JSON dentro da conta) ----------------
+def db():
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
 
-def save(d):
-    with LOCK:
-        tmp = DB.with_suffix(".tmp")
-        tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(DB)
+def init_db():
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS accounts (
+                id SERIAL PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                bots JSONB NOT NULL DEFAULT '[]',
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """)
+        conn.commit()
+
+def load_bots(uid):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT bots FROM accounts WHERE id=%s", (uid,))
+        row = cur.fetchone()
+        return row[0] if row else []
+
+def save_bots(uid, bots):
+    with LOCK, db() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE accounts SET bots=%s WHERE id=%s", (json.dumps(bots), uid))
+        conn.commit()
+
+def all_accounts():
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, bots FROM accounts")
+        return cur.fetchall()  # lista de (id, bots)
 
 def log(bid, kind, text):
     with LOCK, open(LOG_DIR / f"{bid}.log", "a", encoding="utf-8") as f:
@@ -117,6 +142,15 @@ def build_app(bot):
             return m.status in ("administrator", "creator")
         return False
 
+    products = bot.get("products", [])
+    carts = {}  # user_id -> lista de produtos; fica só na memória (zera ao reiniciar o bot)
+    menu_row = []
+    if products:
+        menu_row += ["🛍 Produtos e Serviços", "🛒 Carrinho"]
+    if (payment or {}).get("type"):
+        menu_row.append("✅ Finalizar compra")
+    menu_markup = ReplyKeyboardMarkup([menu_row], resize_keyboard=True) if menu_row else None
+
     def make_cmd(name, text):
         async def h(update, ctx):
             if not await allowed(update):
@@ -189,12 +223,11 @@ def build_app(bot):
             path = (IMG_DIR / qr) if qr else None
             if path and path.exists():
                 with open(path, "rb") as f:
-                    await message.reply_photo(photo=f, caption="📷 QR Code para pagamento")
+                    await message.reply_photo(photo=f, caption="📷 QR Code Pix")
         elif ptype == "api":
             await message.reply_text("Pagamento automático ainda não disponível. Em breve!")
         else:
-            header = f"Itens:\n{items_desc}\n\n" if items_desc else ""
-            await message.reply_text(f"{header}Pagamento não configurado — fale com o vendedor.")
+            await message.reply_text("Pagamento não configurado — fale com o vendedor.")
 
     async def do_checkout(message, uid):
         items = carts.get(uid) or []
@@ -216,6 +249,65 @@ def build_app(bot):
             await do_checkout(update.message, update.effective_user.id)
             log(bid, "CMD", f"/{name} (finalizar compra) de {update.effective_user.id}")
         return h
+
+    def get_categories():
+        cats = {}
+        for idx, p in enumerate(products):
+            c = (p.get("category") or "Geral").strip() or "Geral"
+            cats.setdefault(c, []).append(idx)
+        return cats
+
+    async def send_category(message, cat, idxs):
+        for idx in idxs:
+            p = products[idx]
+            caption = f"*{p.get('name') or 'Produto'}*\n{p.get('price') or ''}\n\n{p.get('description') or ''}".strip()
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🛒 Adicionar ao carrinho", callback_data=f"addcart|{idx}"),
+                InlineKeyboardButton("💳 Comprar", callback_data=f"buy|{idx}")
+            ]])
+            img = p.get("image")
+            path = (IMG_DIR / img) if img else None
+            if path and path.exists():
+                with open(path, "rb") as f:
+                    await message.reply_photo(photo=f, caption=caption, parse_mode="Markdown", reply_markup=kb)
+            else:
+                await message.reply_text(caption, parse_mode="Markdown", reply_markup=kb)
+
+    async def on_catalog(update, ctx):
+        if not await allowed(update):
+            await update.message.reply_text("Somente administradores.")
+            return
+        if not products:
+            await update.message.reply_text("Nenhum produto no catálogo ainda.")
+            return
+        cats = get_categories()
+        if len(cats) <= 1:
+            cat = next(iter(cats))
+            await send_category(update.message, cat, cats[cat])
+        else:
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{c} ({len(idxs)})", callback_data=f"catsel|{c}")]
+                                        for c, idxs in cats.items()])
+            await update.message.reply_text("📂 *Escolha uma categoria:*", parse_mode="Markdown", reply_markup=kb)
+        log(bid, "CATALOGO", f"{update.effective_user.id}: {len(products)} produtos")
+
+    async def on_cart(update, ctx):
+        if not await allowed(update):
+            await update.message.reply_text("Somente administradores.")
+            return
+        u = update.effective_user
+        items = carts.get(u.id) or []
+        if not items:
+            await update.message.reply_text("Seu carrinho está vazio. Use /catalogo para adicionar produtos.")
+            return
+        resumo = "\n".join(f"- {p.get('name')} ({p.get('price') or ''})" for p in items)
+        total = sum(parse_price(p.get("price")) for p in items)
+        marca = "🟢 " if len(items) > 1 else ""
+        resumo += f"\n\n{marca}*Total: {fmt_price(total)}*"
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Finalizar compra", callback_data="checkout"),
+            InlineKeyboardButton("🗑 Esvaziar", callback_data="clearcart")
+        ]])
+        await update.message.reply_text(f"🛒 *Seu carrinho:*\n{resumo}", parse_mode="Markdown", reply_markup=kb)
 
     async def on_contact(update, ctx):
         c = update.message.contact
@@ -312,74 +404,6 @@ def build_app(bot):
         if cb_map.get(data):
             await q.message.reply_text(cb_map[data])
 
-    products = bot.get("products", [])
-    carts = {}  # user_id -> lista de produtos; fica só na memória (zera ao reiniciar o bot)
-    menu_row = []
-    if products:
-        menu_row += ["🛍 Produtos e Serviços", "🛒 Carrinho"]
-    if (payment or {}).get("type"):
-        menu_row.append("✅ Finalizar compra")
-    menu_markup = ReplyKeyboardMarkup([menu_row], resize_keyboard=True) if menu_row else None
-
-    def get_categories():
-        cats = {}
-        for idx, p in enumerate(products):
-            c = (p.get("category") or "Geral").strip() or "Geral"
-            cats.setdefault(c, []).append(idx)
-        return cats
-
-    async def send_category(message, cat, idxs):
-        for idx in idxs:
-            p = products[idx]
-            caption = f"*{p.get('name') or 'Produto'}*\n{p.get('price') or ''}\n\n{p.get('description') or ''}".strip()
-            kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🛒 Adicionar ao carrinho", callback_data=f"addcart|{idx}"),
-                InlineKeyboardButton("💳 Comprar", callback_data=f"buy|{idx}")
-            ]])
-            img = p.get("image")
-            path = (IMG_DIR / img) if img else None
-            if path and path.exists():
-                with open(path, "rb") as f:
-                    await message.reply_photo(photo=f, caption=caption, parse_mode="Markdown", reply_markup=kb)
-            else:
-                await message.reply_text(caption, parse_mode="Markdown", reply_markup=kb)
-
-    async def on_catalog(update, ctx):
-        if not await allowed(update):
-            await update.message.reply_text("Somente administradores.")
-            return
-        if not products:
-            await update.message.reply_text("Nenhum produto no catálogo ainda.")
-            return
-        cats = get_categories()
-        if len(cats) <= 1:
-            cat = next(iter(cats))
-            await send_category(update.message, cat, cats[cat])
-        else:
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{c} ({len(idxs)})", callback_data=f"catsel|{c}")]
-                                        for c, idxs in cats.items()])
-            await update.message.reply_text("📂 *Escolha uma categoria:*", parse_mode="Markdown", reply_markup=kb)
-        log(bid, "CATALOGO", f"{update.effective_user.id}: {len(products)} produtos")
-
-    async def on_cart(update, ctx):
-        if not await allowed(update):
-            await update.message.reply_text("Somente administradores.")
-            return
-        u = update.effective_user
-        items = carts.get(u.id) or []
-        if not items:
-            await update.message.reply_text("Seu carrinho está vazio. Use /catalogo para adicionar produtos.")
-            return
-        resumo = "\n".join(f"- {p.get('name')} ({p.get('price') or ''})" for p in items)
-        total = sum(parse_price(p.get("price")) for p in items)
-        marca = "🟢 " if len(items) > 1 else ""
-        resumo += f"\n\n{marca}*Total: {fmt_price(total)}*"
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Finalizar compra", callback_data="checkout"),
-            InlineKeyboardButton("🗑 Esvaziar", callback_data="clearcart")
-        ]])
-        await update.message.reply_text(f"🛒 *Seu carrinho:*\n{resumo}", parse_mode="Markdown", reply_markup=kb)
-
     a = Application.builder().token(bot["token"]).build()
     for name, text in cmds.items():
         a.add_handler(CommandHandler(name, make_cmd(name, text)))
@@ -404,12 +428,6 @@ def build_app(bot):
     a.add_handler(MessageHandler(filters.LOCATION, on_location))
     a.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     cmd_meta = [(n, f"Comando /{n}") for n in cmds]
-    cmd_meta += [(n, "Ver produtos e serviços") for n in cmd_catalog]
-    cmd_meta += [(n, "Enviar imagem") for n in cmd_image]
-    cmd_meta += [(n, "Abrir link") for n in cmd_link]
-    cmd_meta += [(n, "Pedir contato") for n in cmd_contact]
-    cmd_meta += [(n, "Pedir localização") for n in cmd_location]
-    cmd_meta += [(n, "Finalizar compra") for n in cmd_payment]
     a.bot_data["cmd_names"] = cmd_meta
     return a
 
@@ -445,7 +463,7 @@ class Worker:
         finally:
             await a.shutdown()
 
-workers = {}
+workers = {}  # bid -> Worker (processo/thread único do app inteiro — ver nota do gunicorn --workers 1)
 
 def stop_worker(bid):
     w = workers.pop(bid, None)
@@ -454,18 +472,73 @@ def stop_worker(bid):
         w.thread.join(timeout=10)
         log(bid, "SYS", "parado")
 
-def start_worker(bid):
+def start_worker(uid, bid):
     stop_worker(bid)
-    bot = next((b for b in load()["bots"] if b["id"] == bid), None)
+    bot = next((b for b in load_bots(uid) if b["id"] == bid), None)
     if bot and bot.get("enabled"):
         w = workers[bid] = Worker(bot)
         w.thread.start()
         log(bid, "SYS", "iniciando...")
 
-# ---------------- API ----------------
+# ---------------- Auth ----------------
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "").strip() or os.urandom(24)
 
+def login_required(f):
+    @wraps(f)
+    def wrapper(*a, **kw):
+        if "uid" not in session:
+            if request.path.startswith("/api/"):
+                return jsonify(ok=False, err="Sessão expirada, faça login de novo"), 401
+            return redirect(url_for("login_page"))
+        return f(*a, **kw)
+    return wrapper
+
+@app.route("/login")
+def login_page():
+    if "uid" in session:
+        return redirect(url_for("index"))
+    return render_template("login.html")
+
+@app.route("/api/signup", methods=["POST"])
+def api_signup():
+    d = request.get_json(force=True)
+    email = (d.get("email") or "").strip().lower()
+    pw = d.get("password") or ""
+    if "@" not in email or len(pw) < 6:
+        return jsonify(ok=False, err="E-mail inválido ou senha muito curta (mín. 6 caracteres)"), 400
+    try:
+        with db() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO accounts (email, password_hash) VALUES (%s,%s) RETURNING id",
+                        (email, generate_password_hash(pw)))
+            uid = cur.fetchone()[0]
+            conn.commit()
+    except psycopg2.errors.UniqueViolation:
+        return jsonify(ok=False, err="Esse e-mail já tem conta"), 400
+    session["uid"] = uid
+    return jsonify(ok=True)
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    d = request.get_json(force=True)
+    email = (d.get("email") or "").strip().lower()
+    pw = d.get("password") or ""
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, password_hash FROM accounts WHERE email=%s", (email,))
+        row = cur.fetchone()
+    if not row or not check_password_hash(row[1], pw):
+        return jsonify(ok=False, err="E-mail ou senha incorretos"), 400
+    session["uid"] = row[0]
+    return jsonify(ok=True)
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    session.clear()
+    return jsonify(ok=True)
+
+# ---------------- API ----------------
 @app.route("/")
+@login_required
 def index():
     return render_template("index.html")
 
@@ -475,6 +548,7 @@ def api_image(filename):
     return send_from_directory(IMG_DIR, safe)
 
 @app.route("/api/upload_image", methods=["POST"])
+@login_required
 def api_upload_image():
     f = request.files.get("image")
     if not f or not f.filename:
@@ -487,24 +561,27 @@ def api_upload_image():
     return jsonify(ok=True, filename=fname)
 
 @app.route("/api/bots")
+@login_required
 def api_bots():
-    return jsonify([public(b) for b in load()["bots"]])
+    return jsonify([public(b) for b in load_bots(session["uid"])])
 
 @app.route("/api/bots/new", methods=["POST"])
+@login_required
 def api_new():
+    uid = session["uid"]
     d = request.get_json(force=True)
     token = (d.get("token") or "").strip()
     name = (d.get("name") or "MeuBot").strip()
     if not re.fullmatch(r"\d+:[\w-]{20,}", token):
         return jsonify(ok=False, err="Formato de token inválido (esperado 123456:ABC...)"), 400
-    data = load()
-    if any(b["token"] == token for b in data["bots"]):
+    bots = load_bots(uid)
+    if any(b["token"] == token for b in bots):
         return jsonify(ok=False, err="Token já cadastrado"), 400
     ok, info = check_token(token)
     if not ok:
         return jsonify(ok=False, err=info), 400
     bid = "bot_" + uuid.uuid4().hex[:8]
-    data["bots"].append({
+    bots.append({
         "id": bid, "name": name, "token": token, "enabled": True,
         "commands": [{"cmd": "start", "text": f"Olá! Eu sou o {name}. Como posso ajudar?"}],
         "auto_replies": [], "inline_keyboards": [], "reply_keyboard": [],
@@ -512,45 +589,57 @@ def api_new():
         "payment": {"type": "", "pix_key": "", "pix_name": "", "instructions": "", "qr_image": ""},
         "created": time.strftime("%Y-%m-%d %H:%M"),
     })
-    save(data)
-    start_worker(bid)
+    save_bots(uid, bots)
+    start_worker(uid, bid)
     return jsonify(ok=True, id=bid, username=info)
 
 @app.route("/api/bots/<bid>", methods=["PUT"])
+@login_required
 def api_update(bid):
+    uid = session["uid"]
     body = request.get_json(force=True)
     with LOCK:
-        data = load()
-        b = next((x for x in data["bots"] if x["id"] == bid), None)
+        bots = load_bots(uid)
+        b = next((x for x in bots if x["id"] == bid), None)
         if not b:
             return jsonify(ok=False, err="Bot não encontrado"), 404
         for k in EDITABLE:
             if k in body:
                 b[k] = body[k]
         b["whitelist"] = [int(x) for x in b.get("whitelist", []) if str(x).lstrip("-").isdigit()]
-        save(data)
-    start_worker(bid)  # reinicia se estiver ativo; se pausado, só para
+        save_bots(uid, bots)
+    start_worker(uid, bid)  # reinicia se estiver ativo; se pausado, só para
     return jsonify(ok=True)
 
 @app.route("/api/bots/<bid>", methods=["DELETE"])
+@login_required
 def api_delete(bid):
+    uid = session["uid"]
     stop_worker(bid)
-    data = load()
-    data["bots"] = [b for b in data["bots"] if b["id"] != bid]
-    save(data)
+    bots = [b for b in load_bots(uid) if b["id"] != bid]
+    save_bots(uid, bots)
     (LOG_DIR / f"{bid}.log").unlink(missing_ok=True)
     return jsonify(ok=True)
 
 @app.route("/api/bots/<bid>/log")
+@login_required
 def api_log(bid):
+    uid = session["uid"]
+    if not any(b["id"] == bid for b in load_bots(uid)):
+        return jsonify(ok=False, err="Bot não encontrado"), 404
     safe = re.sub(r"[^\w-]", "", bid)
     p = LOG_DIR / (safe + ".log")
     return jsonify(p.read_text(encoding="utf-8").splitlines()[-200:] if p.exists() else [])
 
+# ---------------- Inicialização (roda tanto no "python app.py" quanto sob gunicorn) ----------------
+init_db()
+for _uid, _bots in all_accounts():
+    for _b in _bots:
+        if _b.get("enabled"):
+            start_worker(_uid, _b["id"])
+
 if __name__ == "__main__":
-    for b in load()["bots"]:
-        if b.get("enabled"):
-            start_worker(b["id"])
-    host = os.environ.get("HOST", "127.0.0.1")  # 0.0.0.0 só se você souber o que está fazendo
-    print(f"TeleBot Builder em http://{host}:5000")
-    app.run(host=host, port=5000, debug=False)
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", 5000))
+    print(f"TeleBot Builder em http://{host}:{port}")
+    app.run(host=host, port=port, debug=False)
