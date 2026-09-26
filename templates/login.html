@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TeleBot Builder — Entrar</title>
+<style>
+:root{--bg:#0A0E14;--card:#121821;--card2:#1A212C;--line:#232C3A;--txt:#EAF0F7;--mut:#8B98AC;--acc:#2FBF9F;--acc-ink:#06120F;--bad:#E5546B}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font:14.5px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+.box{width:340px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:16px;margin-bottom:18px}
+.brand-mark{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--acc),#1c8f76);display:flex;align-items:center;justify-content:center;font-size:14px}
+label{display:block;font-size:12.5px;color:var(--mut);margin:12px 0 4px}
+input{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:9px 10px;font:inherit}
+input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button{width:100%;margin-top:18px;background:var(--acc);color:var(--acc-ink);border:0;padding:10px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13.5px}
+.switch{margin-top:14px;text-align:center;font-size:13px;color:var(--mut)}
+.switch a{color:var(--acc);cursor:pointer;text-decoration:none}
+.err{color:var(--bad);font-size:13px;margin-top:10px;display:none}
+</style></head><body>
+<div class="box">
+ <div class="brand"><span class="brand-mark">🤖</span>TeleBot Builder</div>
+ <div id="title" style="font-weight:600;font-size:15px">Entrar</div>
+ <label>E-mail</label><input id="email" type="email" placeholder="voce@exemplo.com">
+ <label>Senha</label><input id="pw" type="password" placeholder="mínimo 6 caracteres">
+ <button onclick="submit_()" id="btn">Entrar</button>
+ <div class="err" id="err"></div>
+ <div class="switch" id="switchLine">Não tem conta? <a onclick="toggle()">Criar conta</a></div>
+</div>
+<script>
+let mode='login';
+function toggle(){
+ mode = mode==='login' ? 'signup' : 'login';
+ document.getElementById('title').textContent = mode==='login' ? 'Entrar' : 'Criar conta';
+ document.getElementById('btn').textContent = mode==='login' ? 'Entrar' : 'Criar conta';
+ document.getElementById('switchLine').innerHTML = mode==='login'
+  ? 'Não tem conta? <a onclick="toggle()">Criar conta</a>'
+  : 'Já tem conta? <a onclick="toggle()">Entrar</a>';
+}
+async function submit_(){
+ const email=document.getElementById('email').value.trim();
+ const pw=document.getElementById('pw').value;
+ const err=document.getElementById('err');
+ err.style.display='none';
+ const url = mode==='login' ? '/api/login' : '/api/signup';
+ const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
+ const j = await r.json();
+ if(j.ok){ window.location.href='/'; }
+ else{ err.textContent=j.err||'Erro'; err.style.display='block'; }
+}
+</script>
+</body></html>
