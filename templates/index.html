@@ -66,8 +66,22 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:
  .tabnav button{border-left:0;border-bottom:2px solid transparent;border-radius:6px;white-space:nowrap}
  .tabnav button.on{border-bottom-color:var(--acc)}
 }
+@media(max-width:640px){
+ header{padding:10px 14px;flex-wrap:wrap;gap:8px}
+ .brand{font-size:14px}
+ .content{padding:12px}
+ .tabpanel{padding:14px}
+ .row{flex-wrap:wrap}
+ .row>*{flex:1 1 100%;min-width:0}
+ .row>button{flex:0 0 auto}
+ input,textarea,select{font-size:16px} /* evita zoom automático no iPhone ao focar */
+ .nameinput{font-size:17px;min-width:0;flex:1 1 100%}
+ .botheader{gap:8px}
+ .cmdblock img,.cmdblock div[style*="width:48px"],.cmdblock div[style*="width:40px"]{width:100%!important;height:120px!important}
+}
 </style></head><body>
 <header>
+
  <div class="brand"><span class="brand-mark">🤖</span>TeleBot Builder</div>
  <div style="display:flex;gap:8px">
  <button onclick="newBot()">+ Novo bot</button>
