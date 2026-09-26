@@ -69,7 +69,10 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:
 </style></head><body>
 <header>
  <div class="brand"><span class="brand-mark">🤖</span>TeleBot Builder</div>
+ <div style="display:flex;gap:8px">
  <button onclick="newBot()">+ Novo bot</button>
+ <button class="ghost" onclick="logout()">Sair</button>
+ </div>
 </header>
 <div class="shell">
 <aside id="list"></aside>
@@ -112,6 +115,7 @@ function renderList(){
   +'<div class="meta"><div class="name">'+esc(b.name)+'</div><div class="hint">'+esc(b.token_hint)+'</div></div>'
   +'<span class="statuspill'+(b.enabled?' on':'')+'"><span class="dot"></span></span></div>').join('');
  document.querySelectorAll('.botitem').forEach(el=>el.onclick=()=>{collect();sel=el.dataset.id;renderList();renderEditor()})}
+async function logout(){await api('POST','/api/logout');window.location.href='/login'}
 async function newBot(){
  const t=prompt('Token do BotFather:');if(!t)return;
  const n=prompt('Nome do bot:','MeuBot')||'MeuBot';
