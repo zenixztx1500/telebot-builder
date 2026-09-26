@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TeleBot Builder</title>
+<style>
+:root{
+ --bg:#0A0E14;--card:#121821;--card2:#1A212C;--line:#232C3A;
+ --txt:#EAF0F7;--mut:#8B98AC;--acc:#2FBF9F;--acc-ink:#06120F;--ok:#2FBF9F;--bad:#E5546B;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;font:14.5px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased}
+header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--card)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px}
+.brand-mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--acc),#1c8f76);display:flex;align-items:center;justify-content:center;font-size:13px}
+h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 6px;font-weight:600}
+button{background:var(--acc);color:var(--acc-ink);border:0;padding:9px 14px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13.5px;font-family:inherit}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+button.ghost:hover{background:var(--card2)}
+button.danger{background:transparent;border:1px solid rgba(229,84,107,.4);color:var(--bad)}
+button.danger:hover{background:rgba(229,84,107,.08)}
+.shell{display:grid;grid-template-columns:250px 1fr;min-height:calc(100vh - 55px)}
+aside{background:var(--card);border-right:1px solid var(--line);padding:14px;overflow-y:auto}
+.content{padding:22px;max-width:960px}
+label{display:block;font-size:12.5px;color:var(--mut);margin:10px 0 4px}
+input,textarea,select{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font:inherit;font-size:13.5px}
+input::placeholder,textarea::placeholder{color:#57677C}
+input[type=checkbox]{width:auto}
+.row{display:flex;gap:8px;margin-bottom:8px}.row>*{flex:1}.row>button{flex:0 0 auto}
+.tag{display:inline-flex;align-items:center;background:var(--card2);border:1px solid var(--line);border-radius:20px;padding:4px 11px;margin:3px 4px 3px 0;font-size:12.5px;cursor:pointer;color:var(--mut)}
+.tag:hover{color:var(--bad);border-color:rgba(229,84,107,.4)}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;max-height:320px;overflow:auto;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--mut);line-height:1.6}
+.mut{color:var(--mut);font-size:13px}.hide{display:none}
+.actions{margin-top:14px;display:flex;gap:8px}
+.tip{display:block;text-align:left;color:var(--mut);font-size:12px;margin:6px 0 12px 2px}
+.cmdblock{border:1px solid var(--line);border-radius:9px;padding:12px;margin-bottom:12px;background:var(--card2)}
+.cmdblock h2{font-size:13.5px}
+/* lista de bots */
+.botitem{display:flex;align-items:center;gap:10px;padding:9px;border-radius:8px;cursor:pointer;border:1px solid transparent;margin-bottom:4px}
+.botitem:hover{background:var(--card2)}
+.botitem.sel{background:var(--card2);border-color:var(--acc)}
+.avatar{width:32px;height:32px;border-radius:8px;background:var(--card2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--acc);flex:0 0 auto;font-size:13px}
+.botitem .meta{flex:1;min-width:0}
+.botitem .name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.botitem .hint{color:var(--mut);font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.statuspill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--mut);flex:0 0 auto}
+.statuspill .dot{width:7px;height:7px;border-radius:50%;background:var(--mut)}
+.statuspill.on{color:var(--acc)}.statuspill.on .dot{background:var(--acc)}
+/* cabeçalho do bot selecionado */
+.botheader{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+.nameinput{font-size:19px;font-weight:600;border-color:transparent;background:transparent;padding:5px 8px;flex:1;min-width:160px}
+.nameinput:hover,.nameinput:focus{border-color:var(--line);background:var(--card2)}
+/* abas verticais */
+.panelbody{display:grid;grid-template-columns:172px 1fr;gap:18px}
+.tabnav{display:flex;flex-direction:column;gap:2px}
+.tabnav button{display:flex;align-items:center;gap:8px;background:transparent;color:var(--mut);border:0;border-left:2px solid transparent;border-radius:0 6px 6px 0;padding:9px 10px;font-size:13.5px;font-weight:500;text-align:left}
+.tabnav button:hover{background:var(--card2);color:var(--txt)}
+.tabnav button.on{background:var(--card2);color:var(--txt);border-left-color:var(--acc)}
+.tabpanel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px;min-width:0}
+@media(max-width:900px){
+ .shell{grid-template-columns:1fr}
+ aside{border-right:0;border-bottom:1px solid var(--line)}
+ .panelbody{grid-template-columns:1fr}
+ .tabnav{flex-direction:row;overflow-x:auto;gap:6px;padding-bottom:4px}
+ .tabnav button{border-left:0;border-bottom:2px solid transparent;border-radius:6px;white-space:nowrap}
+ .tabnav button.on{border-bottom-color:var(--acc)}
+}
+</style></head><body>
+<header>
+ <div class="brand"><span class="brand-mark">🤖</span>TeleBot Builder</div>
+ <button onclick="newBot()">+ Novo bot</button>
+</header>
+<div class="shell">
+<aside id="list"></aside>
+<div class="content">
+ <div class="mut" id="empty">Selecione um bot ao lado ou crie um novo com o token do BotFather.</div>
+ <div id="editor" class="hide"></div>
+</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const api=(m,p,b)=>fetch(p,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined}).then(r=>r.json());
+const TABS=[['t_cmd','💬','Comandos'],['t_prod','🛍','Produtos e Serviços'],['t_pay','💳','Pagamento'],['t_auto','⚡','Respostas auto'],['t_filter','🚫','Filtros'],['t_perm','🔒','Permissões'],['t_log','📜','Log']];
+const ACTION_META={
+ '':{label:'Responder com texto',desc:'Envia uma mensagem de texto quando o usuário digitar o comando.'},
+ 'catalog':{label:'Abrir catálogo',desc:'Mostra automaticamente todos os produtos cadastrados na aba Produtos e Serviços.'},
+ 'image':{label:'Enviar imagem',desc:'Envia uma foto com legenda quando o usuário digitar o comando.'},
+ 'link':{label:'Abrir link',desc:'Envia um botão que abre um site ou link externo ao clicar.'},
+ 'contact':{label:'Pedir contato',desc:'Mostra um botão para o usuário compartilhar o telefone dele com o bot.'},
+ 'location':{label:'Pedir localização',desc:'Mostra um botão para o usuário compartilhar a localização dele com o bot.'},
+ 'payment':{label:'Finalizar compra',desc:'Envia o resumo do carrinho (itens + total), depois a chave Pix para copiar, os dados do recebedor e por último o QR Code, na ordem.'}
+};
+const MODE_META={
+ 'contains':{label:'contém',desc:'A resposta dispara quando a mensagem do usuário contém essa palavra ou frase em qualquer parte do texto.'},
+ 'exact':{label:'exata',desc:'A resposta só dispara quando a mensagem do usuário for exatamente igual a essa palavra ou frase.'}
+};
+const PAY_META={
+ '':{label:'Nenhum',desc:'Pagamento desativado — o bot não vai enviar nenhuma opção de pagamento.'},
+ 'api':{label:'Atendimento automático (API bancária)',desc:'Em breve: cobrança automática via API de banco/gateway, com confirmação sozinha. Ainda não implementado nesta versão.'},
+ 'pix':{label:'Atendimento direto (chave Pix)',desc:'O bot envia sua chave Pix e instruções; o cliente paga manualmente e você confirma o recebimento por fora.'}
+};
+let bots=[],sel=null,tab='t_cmd';
+const cur=()=>bots.find(x=>x.id===sel);
+
+async function refresh(){bots=await api('GET','/api/bots');if(sel&&!cur())sel=null;renderList();renderEditor()}
+function renderList(){
+ if(!bots.length){$('list').innerHTML='<div class="mut">Nenhum bot ainda.</div>';return}
+ $('list').innerHTML=bots.map(b=>'<div class="botitem'+(sel===b.id?' sel':'')+'" data-id="'+b.id+'">'
+  +'<div class="avatar">'+esc((b.name||'?').trim().charAt(0).toUpperCase())+'</div>'
+  +'<div class="meta"><div class="name">'+esc(b.name)+'</div><div class="hint">'+esc(b.token_hint)+'</div></div>'
+  +'<span class="statuspill'+(b.enabled?' on':'')+'"><span class="dot"></span></span></div>').join('');
+ document.querySelectorAll('.botitem').forEach(el=>el.onclick=()=>{collect();sel=el.dataset.id;renderList();renderEditor()})}
+async function newBot(){
+ const t=prompt('Token do BotFather:');if(!t)return;
+ const n=prompt('Nome do bot:','MeuBot')||'MeuBot';
+ const j=await api('POST','/api/bots/new',{token:t,name:n});
+ if(j.ok){sel=j.id;tab='t_cmd';refresh()}else alert(j.err)}
+
+function rows(list,fields,ph){ // linhas editáveis genéricas (usado por auto_replies)
+ return cur()[list].map((r,i)=>{
+  const line='<div class="row">'+fields.map(f=>f.t==='area'
+   ?'<textarea rows="2" data-l="'+list+'" data-i="'+i+'" data-f="'+f.k+'" placeholder="'+f.p+'">'+esc(r[f.k])+'</textarea>'
+   :f.t==='mode'
+   ?'<select data-l="'+list+'" data-i="'+i+'" data-f="mode" onchange="collect();renderEditor()"><option value="contains"'+(r.mode!=='exact'?' selected':'')+'>'+MODE_META.contains.label+'</option><option value="exact"'+(r.mode==='exact'?' selected':'')+'>'+MODE_META.exact.label+'</option></select>'
+   :'<input data-l="'+list+'" data-i="'+i+'" data-f="'+f.k+'" value="'+esc(r[f.k])+'" placeholder="'+f.p+'">').join('')
+   +'<button class="ghost" title="Remover" onclick="rm(\''+list+'\','+i+')">✕</button></div>';
+  const hasMode=fields.some(f=>f.t==='mode');
+  const tip=hasMode?'<small class="tip">'+MODE_META[r.mode==='exact'?'exact':'contains'].desc+'</small>':'';
+  return line+tip;
+ }).join('')}
+const saveBtn='<div class="actions"><button onclick="save()">Salvar</button></div>';
+
+function cmdRows(b){
+ if(!b.commands.length)return '<p class="mut">Nenhum comando ainda.</p>';
+ return b.commands.map((c,i)=>{
+  const act=c.action||'';
+  let extra='';
+  if(act===''){
+   extra='<textarea rows="2" data-l="commands" data-i="'+i+'" data-f="text" placeholder="resposta">'+esc(c.text)+'</textarea>';
+  }else if(act==='image'){
+   const thumb=c.image?'<img src="/images/'+esc(c.image)+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--line);flex:0 0 auto">':'';
+   extra='<div class="row" style="align-items:center">'+thumb
+    +'<input type="file" accept="image/*" onchange="uploadCmdImage(this,'+i+')">'
+    +'<textarea rows="1" data-l="commands" data-i="'+i+'" data-f="text" placeholder="legenda">'+esc(c.text)+'</textarea></div>';
+  }else if(act==='link'){
+   extra='<div class="row"><input data-l="commands" data-i="'+i+'" data-f="url" value="'+esc(c.url||'')+'" placeholder="https://exemplo.com">'
+    +'<input data-l="commands" data-i="'+i+'" data-f="text" value="'+esc(c.text)+'" placeholder="texto do botão"></div>';
+  }
+  return '<div class="cmdblock">'
+   +'<div class="row">'
+   +'<input data-l="commands" data-i="'+i+'" data-f="cmd" value="'+esc(c.cmd)+'" placeholder="nome (sem /)">'
+   +'<select data-l="commands" data-i="'+i+'" data-f="action" onchange="collect();renderEditor()">'
+   +Object.entries(ACTION_META).map(([v,m])=>'<option value="'+v+'"'+(act===v?' selected':'')+'>'+m.label+'</option>').join('')
+   +'</select>'
+   +'<button class="ghost" title="Remover" onclick="rm(\'commands\','+i+')">✕</button>'
+   +'</div>'
+   +'<small class="tip">'+ACTION_META[act].desc+'</small>'
+   +extra
+   +'</div>'
+ }).join('')}
+
+async function uploadCmdImage(input,i){
+ if(!input.files||!input.files[0])return;
+ if(!collect())return;
+ const fd=new FormData();fd.append('image',input.files[0]);
+ const r=await fetch('/api/upload_image',{method:'POST',body:fd});
+ const j=await r.json();
+ if(!j.ok){alert(j.err);return}
+ cur().commands[i].image=j.filename;
+ renderEditor()}
+
+function catGroups(b){
+ const groups=new Map();
+ b.products.forEach((p,i)=>{
+  const c=(p.category||'').trim()||'Geral';
+  if(!groups.has(c))groups.set(c,[]);
+  groups.get(c).push(i);
+ });
+ return groups;
+}
+function prodRow(p,i){
+ const thumb=p.image
+  ?'<img src="/images/'+esc(p.image)+'" style="width:48px;height:48px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex:0 0 auto">'
+  :'<div style="width:48px;height:48px;border-radius:8px;border:1px solid var(--line);flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:10px;text-align:center">sem foto</div>';
+ return '<div class="row" style="align-items:center;flex-wrap:wrap">'
+  +thumb
+  +'<input type="file" accept="image/*" style="flex:1 1 140px" onchange="uploadProdImage(this,'+i+')">'
+  +'<input data-l="products" data-i="'+i+'" data-f="name" value="'+esc(p.name)+'" placeholder="nome do produto">'
+  +'<input data-l="products" data-i="'+i+'" data-f="price" value="'+esc(p.price)+'" placeholder="preço">'
+  +'<textarea rows="1" data-l="products" data-i="'+i+'" data-f="description" placeholder="descrição">'+esc(p.description)+'</textarea>'
+  +'<button class="ghost" title="Remover" onclick="rm(\'products\','+i+')">✕</button></div>'}
+function prodCatalogHTML(b){
+ const groups=catGroups(b);
+ if(!b.products.length)return '<p class="mut">Nenhuma categoria ainda. Clique em "+ Nova categoria" para começar.</p>';
+ let html='';
+ for(const [cat,idxs] of groups){
+  html+='<div class="cmdblock"><div class="row" style="align-items:center">'
+   +'<h2 style="margin:0;flex:1">'+esc(cat)+' <span class="mut">('+idxs.length+')</span></h2>'
+   +'<button class="ghost" onclick="addProductToCat(\''+esc(cat).replace(/'/g,"\\'")+'\')">+ Produto</button></div>'
+   +idxs.map(i=>prodRow(b.products[i],i)).join('')
+   +'</div>';
+ }
+ return html}
+function addProductToCat(cat){
+ if(!collect())return;
+ cur().products.push({name:'',price:'',description:'',image:'',category:cat});
+ renderEditor()}
+function newCategory(){
+ const name=(prompt('Nome da nova categoria (ex: Cursos, Ferramentas digitais):')||'').trim();
+ if(!name)return;
+ addProductToCat(name)}
+
+async function uploadProdImage(input,i){
+ if(!input.files||!input.files[0])return;
+ if(!collect())return;
+ const fd=new FormData();fd.append('image',input.files[0]);
+ const r=await fetch('/api/upload_image',{method:'POST',body:fd});
+ const j=await r.json();
+ if(!j.ok){alert(j.err);return}
+ cur().products[i].image=j.filename;
+ renderEditor()}
+
+function payBlock(b){
+ b.payment=b.payment||{type:'',pix_key:'',pix_name:'',instructions:'',qr_image:''};
+ const t=b.payment.type||'';
+ let extra='';
+ if(t==='pix'){
+  const thumb=b.payment.qr_image?'<img src="/images/'+esc(b.payment.qr_image)+'" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">':'';
+  extra='<label>Sua chave Pix</label><input id="pay_pixkey" value="'+esc(b.payment.pix_key||'')+'" placeholder="e-mail, CPF, telefone ou chave aleatória">'
+   +'<label>Nome do recebedor</label><input id="pay_pixname" value="'+esc(b.payment.pix_name||'')+'" placeholder="Nome que aparece no Pix">'
+   +'<label>Instruções para o cliente</label><textarea id="pay_instructions" rows="3" placeholder="Ex: envie o comprovante aqui depois de pagar.">'+esc(b.payment.instructions||'')+'</textarea>'
+   +'<label>Imagem do QR Code (opcional)</label><div class="row" style="align-items:center">'+thumb+'<input type="file" accept="image/*" onchange="uploadQr(this)"></div>';
+ }else if(t==='api'){
+  extra='<p class="mut">Essa opção ainda não está implementada nesta versão — em breve.</p>';
+ }
+ return '<h2>Pagamento</h2><p class="mut">Escolha como o bot trata pagamentos. Depois, crie um comando na aba Comandos com a ação "Finalizar compra" para o cliente acionar.</p>'
+  +'<label>Tipo</label><select id="pay_type" onchange="collect();renderEditor()">'
+  +Object.entries(PAY_META).map(([v,m])=>'<option value="'+v+'"'+(t===v?' selected':'')+'>'+m.label+'</option>').join('')
+  +'</select><small class="tip">'+PAY_META[t].desc+'</small>'
+  +extra+saveBtn}
+
+async function uploadQr(input){
+ if(!input.files||!input.files[0])return;
+ if(!collect())return;
+ const fd=new FormData();fd.append('image',input.files[0]);
+ const r=await fetch('/api/upload_image',{method:'POST',body:fd});
+ const j=await r.json();
+ if(!j.ok){alert(j.err);return}
+ cur().payment.qr_image=j.filename;
+ renderEditor()}
+
+function renderEditor(){
+ const b=cur();
+ $('empty').classList.toggle('hide',!!b);$('editor').classList.toggle('hide',!b);
+ if(!b)return;
+ b.products=b.products||[];
+ b.payment=b.payment||{type:'',pix_key:'',pix_name:'',instructions:'',qr_image:''};
+ $('editor').innerHTML=
+ '<div class="botheader">'
+ +'<input id="f_name" class="nameinput" value="'+esc(b.name)+'" placeholder="Nome do bot">'
+ +'<span class="statuspill'+(b.enabled?' on':'')+'"><span class="dot"></span>'+(b.enabled?'Ativo':'Pausado')+'</span>'
+ +'<button class="ghost" onclick="toggleEnable()">'+(b.enabled?'Pausar':'Ativar')+'</button>'
+ +'<button class="danger" onclick="delBot()">Excluir</button>'
+ +'</div>'
+ +'<div class="panelbody">'
+ +'<div class="tabnav">'+TABS.map(([id,icon,l])=>'<button class="'+(tab===id?'on':'')+'" onclick="setTab(\''+id+'\')">'+icon+' '+l+'</button>').join('')+'</div>'
+ +'<div class="tabpanel">'
+ +'<div id="t_cmd"><h2>Comandos</h2><p class="mut">Ficam visíveis no menu "/" do bot no Telegram. Escolha a ação — a explicação aparece logo abaixo do menu.</p>'+cmdRows(b)
+ +'<button class="ghost" onclick="add(\'commands\',{cmd:\'\',text:\'\',action:\'\'})">+ Comando</button>'+saveBtn+'</div>'
+ +'<div id="t_prod"><h2>Produtos e Serviços</h2><p class="mut">Crie uma categoria, adicione os produtos dela e salve. Para vender outro tipo de produto, clique em "+ Nova categoria" e repita. Cada categoria vira um catálogo separado que o cliente escolhe no bot.</p>'+prodCatalogHTML(b)
+ +'<button class="ghost" onclick="newCategory()">+ Nova categoria</button>'+saveBtn+'</div>'
+ +'<div id="t_pay">'+payBlock(b)+'</div>'
+ +'<div id="t_auto"><h2>Respostas automáticas</h2>'+rows('auto_replies',[{k:'match',p:'palavra'},{t:'mode'},{k:'reply',t:'area',p:'resposta'}])
+ +'<button class="ghost" onclick="add(\'auto_replies\',{match:\'\',mode:\'contains\',reply:\'\'})">+ Regra</button>'+saveBtn+'</div>'
+ +'<div id="t_filter"><h2>Palavras banidas</h2><p class="mut">Clique numa palavra para remover.</p><div>'
+ +b.banned_words.map((w,i)=>'<span class="tag" onclick="rmBan('+i+')">'+esc(w)+' ✕</span>').join('')
+ +'</div><div class="row" style="margin-top:8px"><input id="banword" placeholder="palavra"><button class="ghost" onclick="addBan()">Adicionar</button></div>'+saveBtn+'</div>'
+ +'<div id="t_perm"><h2>Permissões</h2><label><input type="checkbox" id="admin_only" '+(b.admin_only?'checked':'')+'> Somente admins do grupo / whitelist</label>'
+ +'<label>Whitelist (IDs do Telegram separados por vírgula)</label><input id="whitelist" value="'+esc((b.whitelist||[]).join(', '))+'">'+saveBtn+'</div>'
+ +'<div id="t_log"><pre id="logbox">carregando...</pre><button class="ghost" onclick="loadLog()">Atualizar</button></div>'
+ +'</div></div>';
+ showTab()}
+function showTab(){TABS.forEach(([id])=>{const e=$(id);if(e)e.classList.toggle('hide',id!==tab)});if(tab==='t_log')loadLog()}
+function setTab(id){collect();tab=id;renderEditor()}
+
+function collect(){ // lê os campos da tela para o objeto local; devolve false se JSON inválido
+ const b=cur();if(!b||!$('f_name'))return true;
+ b.name=$('f_name').value;
+ document.querySelectorAll('[data-l]').forEach(e=>{let v=e.value;if(e.dataset.f==='cmd')v=v.replace(/^\//,'').toLowerCase();b[e.dataset.l][e.dataset.i][e.dataset.f]=v});
+ b.admin_only=$('admin_only').checked;
+ b.whitelist=$('whitelist').value.split(',').map(s=>parseInt(s.trim(),10)).filter(x=>!isNaN(x));
+ if($('pay_type')){
+  b.payment=b.payment||{};
+  b.payment.type=$('pay_type').value;
+  if($('pay_pixkey'))b.payment.pix_key=$('pay_pixkey').value;
+  if($('pay_pixname'))b.payment.pix_name=$('pay_pixname').value;
+  if($('pay_instructions'))b.payment.instructions=$('pay_instructions').value;
+ }
+ return true}
+function add(list,obj){if(!collect())return;cur()[list].push(obj);renderEditor()}
+function rm(list,i){if(!collect())return;cur()[list].splice(i,1);renderEditor()}
+function addBan(){if(!collect())return;const v=$('banword').value.trim().toLowerCase();if(!v)return;const b=cur();if(!b.banned_words.includes(v))b.banned_words.push(v);renderEditor()}
+function rmBan(i){if(!collect())return;cur().banned_words.splice(i,1);renderEditor()}
+async function save(){if(!collect())return;const b=cur();const j=await api('PUT','/api/bots/'+b.id,b);alert(j.ok?'Salvo':j.err);refresh()}
+async function toggleEnable(){if(!collect())return;const b=cur();b.enabled=!b.enabled;await api('PUT','/api/bots/'+b.id,b);refresh()}
+async function delBot(){if(!confirm('Excluir este bot?'))return;await api('DELETE','/api/bots/'+sel);sel=null;refresh()}
+async function loadLog(){if(!sel)return;const l=await api('GET','/api/bots/'+sel+'/log');const p=$('logbox');if(p)p.textContent=l.join('\n')||'(vazio)'}
+setInterval(()=>{if(sel&&tab==='t_log')loadLog()},5000);
+refresh();
+</script></body></html>
