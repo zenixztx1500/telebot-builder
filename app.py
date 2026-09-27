@@ -1,21 +1,22 @@
 # -*- coding: utf-8 -*-
 """TeleBot Builder - painel Flask multi-cliente (contas + Postgres) para criar e gerenciar bots do Telegram."""
-import asyncio, json, os, re, threading, time, uuid, urllib.request, urllib.error
+import asyncio, io, json, os, re, threading, time, uuid, urllib.request, urllib.error
 import httpx  # importar aqui (thread principal) evita erro de módulo parcialmente inicializado quando vários bots sobem ao mesmo tempo
 from functools import wraps
 from pathlib import Path
 import psycopg2
 import psycopg2.extras
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response
 from telegram import (Update, BotCommand, InlineKeyboardButton,
                       InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton)
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           CallbackQueryHandler, filters)
 
 BASE = Path(__file__).parent
-LOG_DIR = BASE / "data" / "logs"
-IMG_DIR = BASE / "data" / "images"
+DATA_DIR = Path(os.environ.get("DATA_DIR", BASE / "data"))
+LOG_DIR = DATA_DIR / "logs"
+IMG_DIR = DATA_DIR / "images"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 LOCK = threading.RLock()
@@ -24,6 +25,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 EDITABLE = ("name", "commands", "auto_replies", "inline_keyboards", "reply_keyboard",
             "banned_words", "admin_only", "whitelist", "enabled", "products", "payment")
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+IMG_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
 
 # ---------------- Banco de dados (uma conta por cliente; bots ficam num JSON dentro da conta) ----------------
 def db():
@@ -40,7 +42,33 @@ def init_db():
                 created_at TIMESTAMPTZ DEFAULT now()
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS images (
+                filename TEXT PRIMARY KEY,
+                content_type TEXT NOT NULL,
+                data BYTEA NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """)
         conn.commit()
+
+def save_image(fname, content):
+    """Salva a imagem DENTRO do banco (o disco do Render é apagado a cada deploy/restart)."""
+    ctype = IMG_MIME.get(os.path.splitext(fname)[1].lower(), "application/octet-stream")
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("""INSERT INTO images (filename, content_type, data) VALUES (%s,%s,%s)
+                       ON CONFLICT (filename) DO UPDATE SET data=EXCLUDED.data, content_type=EXCLUDED.content_type""",
+                    (fname, ctype, psycopg2.Binary(content)))
+        conn.commit()
+
+def get_image(fname):
+    """Devolve (content_type, bytes) ou None."""
+    if not fname:
+        return None
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT content_type, data FROM images WHERE filename=%s", (fname,))
+        row = cur.fetchone()
+        return (row[0], bytes(row[1])) if row else None
 
 def load_bots(uid):
     with db() as conn, conn.cursor() as cur:
@@ -167,10 +195,9 @@ def build_app(bot):
             if not await allowed(update):
                 await update.message.reply_text("Somente administradores.")
                 return
-            path = (IMG_DIR / image) if image else None
-            if path and path.exists():
-                with open(path, "rb") as f:
-                    await update.message.reply_photo(photo=f, caption=caption or None)
+            img = get_image(image)
+            if img:
+                await update.message.reply_photo(photo=io.BytesIO(img[1]), caption=caption or None)
             else:
                 await update.message.reply_text(caption or "(sem imagem cadastrada)")
             log(bid, "CMD", f"/{name} (imagem) de {update.effective_user.id}")
@@ -221,10 +248,9 @@ def build_app(bot):
             if info.strip():
                 await message.reply_text(info.strip())
             qr = payment.get("qr_image")
-            path = (IMG_DIR / qr) if qr else None
-            if path and path.exists():
-                with open(path, "rb") as f:
-                    await message.reply_photo(photo=f, caption="📷 QR Code Pix")
+            qimg = get_image(qr)
+            if qimg:
+                await message.reply_photo(photo=io.BytesIO(qimg[1]), caption="📷 QR Code Pix")
         elif ptype == "api":
             await message.reply_text("Pagamento automático ainda não disponível. Em breve!")
         else:
@@ -266,11 +292,9 @@ def build_app(bot):
                 InlineKeyboardButton("🛒 Adicionar ao carrinho", callback_data=f"addcart|{idx}"),
                 InlineKeyboardButton("💳 Comprar", callback_data=f"buy|{idx}")
             ]])
-            img = p.get("image")
-            path = (IMG_DIR / img) if img else None
-            if path and path.exists():
-                with open(path, "rb") as f:
-                    await message.reply_photo(photo=f, caption=caption, parse_mode="Markdown", reply_markup=kb)
+            pimg = get_image(p.get("image"))
+            if pimg:
+                await message.reply_photo(photo=io.BytesIO(pimg[1]), caption=caption, parse_mode="Markdown", reply_markup=kb)
             else:
                 await message.reply_text(caption, parse_mode="Markdown", reply_markup=kb)
 
