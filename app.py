@@ -570,7 +570,11 @@ def index():
 @app.route("/images/<path:filename>")
 def api_image(filename):
     safe = re.sub(r"[^\w.-]", "", filename)
-    return send_from_directory(IMG_DIR, safe)
+    img = get_image(safe)
+    if not img:
+        return jsonify(ok=False, err="Imagem não encontrada"), 404
+    ctype, data = img
+    return Response(data, mimetype=ctype)
 
 @app.route("/api/upload_image", methods=["POST"])
 @login_required
@@ -582,7 +586,7 @@ def api_upload_image():
     if ext not in IMG_EXTS:
         return jsonify(ok=False, err="Formato de imagem inválido (use jpg, png, webp ou gif)"), 400
     fname = uuid.uuid4().hex + ext
-    f.save(IMG_DIR / fname)
+    save_image(fname, f.read())
     return jsonify(ok=True, filename=fname)
 
 @app.route("/api/bots")
