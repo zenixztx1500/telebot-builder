@@ -586,7 +586,10 @@ def api_upload_image():
     if ext not in IMG_EXTS:
         return jsonify(ok=False, err="Formato de imagem inválido (use jpg, png, webp ou gif)"), 400
     fname = uuid.uuid4().hex + ext
-    save_image(fname, f.read())
+    try:
+        save_image(fname, f.read())
+    except Exception as e:
+        return jsonify(ok=False, err=f"Erro ao salvar no banco: {e}"), 500
     return jsonify(ok=True, filename=fname)
 
 @app.route("/api/bots")
