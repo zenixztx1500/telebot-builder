@@ -50,6 +50,17 @@ def init_db():
                 created_at TIMESTAMPTZ DEFAULT now()
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pix_orders (
+                order_id TEXT PRIMARY KEY,
+                bid TEXT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                summary TEXT NOT NULL,
+                total_cents INT NOT NULL,
+                paid BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """)
         conn.commit()
 
 def save_image(fname, content):
@@ -86,14 +97,47 @@ def all_accounts():
         cur.execute("SELECT id, bots FROM accounts")
         return cur.fetchall()  # lista de (id, bots)
 
+def save_order(order_id, bid, chat_id, summary, total_cents):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO pix_orders (order_id, bid, chat_id, summary, total_cents) VALUES (%s,%s,%s,%s,%s)",
+                    (order_id, bid, chat_id, summary, total_cents))
+        conn.commit()
+
+def pending_orders(bid):
+    """Pedidos Pix do bot ainda não pagos, criados nas últimas 24h."""
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT order_id FROM pix_orders
+                       WHERE bid=%s AND NOT paid AND created_at > now() - interval '24 hours'""", (bid,))
+        return [r[0] for r in cur.fetchall()]
+
+def order_paid(order_id, bid):
+    """True/False conforme o pedido; None se não existe."""
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT paid FROM pix_orders WHERE order_id=%s AND bid=%s", (order_id, bid))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+def mark_paid(order_id):
+    """Marca como pago só uma vez. Devolve (chat_id, summary) na primeira vez, senão None."""
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE pix_orders SET paid=true WHERE order_id=%s AND NOT paid RETURNING chat_id, summary",
+                    (order_id,))
+        row = cur.fetchone()
+        conn.commit()
+        return row
+
 def log(bid, kind, text):
     with LOCK, open(LOG_DIR / f"{bid}.log", "a", encoding="utf-8") as f:
         f.write(f"[{time.strftime('%H:%M:%S')}] {kind}: {text}\n")
 
 def public(b):
-    """Nunca devolve o token completo para o navegador."""
+    """Nunca devolve o token completo (nem o do PagBank) para o navegador."""
     out = {k: v for k, v in b.items() if k != "token"}
     out["token_hint"] = b["token"].split(":")[0] + ":..." + b["token"][-4:]
+    pay = dict(b.get("payment") or {})
+    tok = pay.pop("pagbank_token", "")
+    pay["pagbank_token_hint"] = ("..." + tok[-4:]) if tok else ""
+    out["payment"] = pay
     return out
 
 def check_token(token):
@@ -122,6 +166,62 @@ def parse_price(s):
 
 def fmt_price(v):
     return "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def cpf_ok(cpf):
+    if len(cpf) != 11 or cpf == cpf[0] * 11:
+        return False
+    for i in (9, 10):
+        soma = sum(int(cpf[j]) * (i + 1 - j) for j in range(i))
+        if (soma * 10) % 11 % 10 != int(cpf[i]):
+            return False
+    return True
+
+def email_ok(email):
+    return re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) is not None
+
+# ---------------- PagBank (pagamento automático por token de API) ----------------
+PAGBANK_URLS = {"producao": "https://api.pagseguro.com", "sandbox": "https://sandbox.api.pagseguro.com"}
+
+def pagbank_url(pay):
+    return PAGBANK_URLS["producao" if (pay or {}).get("pagbank_env") == "producao" else "sandbox"]
+
+def pagbank_headers(pay):
+    return {"Authorization": f"Bearer {pay.get('pagbank_token', '')}",
+            "Content-Type": "application/json", "Accept": "application/json"}
+
+def pagbank_token_ok(token, env):
+    """Consulta um pedido inexistente: 404 = token aceito, 401/403 = recusado. None = sem conexão."""
+    url = PAGBANK_URLS["producao" if env == "producao" else "sandbox"]
+    try:
+        r = httpx.get(f"{url}/orders/ORDE_00000000-0000-0000-0000-000000000000",
+                      headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=15)
+    except Exception:
+        return None
+    return r.status_code == 404
+
+async def pagbank_create_pix(pay, reference, customer, lines):
+    """lines = [(nome, qtd, centavos)]. Devolve (order_id, copia_e_cola, url_png_do_qr)."""
+    body = {
+        "reference_id": reference,
+        "customer": {"name": customer["nome"], "email": customer["email"], "tax_id": customer["cpf"]},
+        "items": [{"name": n, "quantity": q, "unit_amount": c} for n, q, c in lines],
+        "qr_codes": [{"amount": {"value": sum(q * c for _, q, c in lines)}}],
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(f"{pagbank_url(pay)}/orders", headers=pagbank_headers(pay), json=body)
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"PagBank {r.status_code}: {r.text[:300]}")
+    d = r.json()
+    qr = d["qr_codes"][0]
+    png = next((l.get("href") for l in qr.get("links", []) if l.get("rel") == "QRCODE.PNG"), None)
+    return d["id"], qr["text"], png
+
+async def pagbank_is_paid(pay, order_id):
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(f"{pagbank_url(pay)}/orders/{order_id}", headers=pagbank_headers(pay))
+    if r.status_code != 200:
+        raise RuntimeError(f"PagBank {r.status_code}: {r.text[:300]}")
+    return any(ch.get("status") == "PAID" for ch in r.json().get("charges", []))
 
 # ---------------- Bot ----------------
 def build_app(bot):
@@ -235,11 +335,121 @@ def build_app(bot):
             log(bid, "CMD", f"/{name} (pedir localização) de {update.effective_user.id}")
         return h
 
-    async def send_payment(message, items_desc=None):
+    pay_state = {}  # user_id -> {"step", "lines", "data"} enquanto o cliente informa nome/CPF/e-mail
+    customers = {}  # user_id -> {"nome", "cpf", "email"}; fica só na memória (pergunta de novo após reiniciar)
+
+    def cart_lines(items):
+        """Agrupa itens iguais -> [(nome, qtd, centavos)] para o PagBank."""
+        grouped = {}
+        for p in items:
+            k = ((p.get("name") or "Produto")[:64], int(round(parse_price(p.get("price")) * 100)))
+            grouped[k] = grouped.get(k, 0) + 1
+        return [(n, q, c) for (n, c), q in grouped.items() if c > 0]
+
+    async def create_and_send_pix(message, user, lines, customer):
+        total = sum(q * c for _, q, c in lines)
+        summary = (f"Cliente: {customer['nome']} (@{user.username or 'sem username'}, ID {user.id})\n"
+                   f"E-mail: {customer['email']}\n\n"
+                   + "\n".join(f"{q}x {n}" for n, q, _ in lines) + f"\n\nTotal: {fmt_price(total / 100)}")
+        try:
+            order_id, copia, png = await pagbank_create_pix(
+                payment, f"{bid}-{user.id}-{uuid.uuid4().hex[:8]}", customer, lines)
+        except Exception as e:
+            log(bid, "ERR", f"Pix: {e}")
+            await message.reply_text("⚠️ Não consegui gerar o Pix agora. Tente de novo em instantes.")
+            return
+        save_order(order_id, bid, message.chat_id, summary, total)
+        log(bid, "PIX", f"{user.id} pedido {order_id} {fmt_price(total / 100)}")
+        await message.reply_text(f"💳 Pedido criado! Total: {fmt_price(total / 100)}")
+        if png:
+            try:
+                await message.reply_photo(photo=png, caption="📷 Escaneie o QR Code no app do seu banco.")
+            except Exception as e:
+                log(bid, "WARN", f"imagem do QR: {e}")
+        await message.reply_text(
+            f"Pix copia e cola (toque para copiar):\n\n`{copia}`\n\n"
+            "Assim que o pagamento cair, você recebe a confirmação aqui automaticamente.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Já paguei, verificar",
+                                                                     callback_data=f"pixchk|{order_id}")]]))
+
+    async def api_checkout(message, user, items):
+        if not payment.get("pagbank_token"):
+            await message.reply_text("Pagamento automático não configurado — fale com o vendedor.")
+            return
+        lines = cart_lines(items)
+        if not lines:
+            await message.reply_text("Esses produtos estão sem preço. Fale com o vendedor.")
+            return
+        if user.id in customers:
+            await create_and_send_pix(message, user, lines, customers[user.id])
+            return
+        pay_state[user.id] = {"step": "nome", "lines": lines, "data": {}}
+        await message.reply_text("Para gerar o Pix preciso de alguns dados (só na primeira compra). "
+                                 "Envie *cancelar* para desistir.\n\n1/3 — Qual é o seu *nome completo*?",
+                                 parse_mode="Markdown")
+
+    async def on_pay_step(msg, u, txt):
+        st = pay_state[u.id]
+        d = st["data"]
+        if txt.lower() == "cancelar":
+            pay_state.pop(u.id, None)
+            await msg.reply_text("Compra cancelada.")
+        elif st["step"] == "nome":
+            if len(txt.split()) < 2:
+                await msg.reply_text("Envie seu nome completo (nome e sobrenome).")
+                return
+            d["nome"] = txt[:100]
+            st["step"] = "cpf"
+            await msg.reply_text("2/3 — Agora envie seu CPF (só os números).")
+        elif st["step"] == "cpf":
+            cpf = re.sub(r"\D", "", txt)
+            if not cpf_ok(cpf):
+                await msg.reply_text("CPF inválido. Confira e envie de novo (11 números).")
+                return
+            d["cpf"] = cpf
+            st["step"] = "email"
+            await msg.reply_text("3/3 — Por último, seu e-mail.")
+        elif st["step"] == "email":
+            if not email_ok(txt):
+                await msg.reply_text("E-mail inválido. Envie no formato nome@exemplo.com")
+                return
+            d["email"] = txt
+            customers[u.id] = d
+            pay_state.pop(u.id, None)
+            await msg.reply_text("✅ Dados recebidos! Gerando seu Pix...")
+            await create_and_send_pix(msg, u, st["lines"], d)
+
+    async def notify_paid(bot_api, order_id):
+        row = mark_paid(order_id)
+        if not row:
+            return
+        chat_id, summary = row
+        await bot_api.send_message(chat_id, "✅ Pagamento confirmado! Obrigado pela compra.")
+        admin = str(payment.get("admin_chat_id") or "").strip()
+        if admin.lstrip("-").isdigit():
+            try:
+                await bot_api.send_message(int(admin), f"✅ PAGAMENTO CONFIRMADO ({order_id})\n\n{summary}")
+            except Exception as e:
+                log(bid, "WARN", f"aviso ao vendedor: {e}")
+        log(bid, "PAGO", f"{order_id} chat {chat_id}")
+
+    async def check_pending(bot_api):
+        """Chamado pelo Worker a cada 30s: confirma pagamentos sem o cliente precisar tocar em nada."""
+        if payment.get("type") != "api" or not payment.get("pagbank_token"):
+            return
+        for order_id in pending_orders(bid):
+            try:
+                if await pagbank_is_paid(payment, order_id):
+                    await notify_paid(bot_api, order_id)
+            except Exception as e:
+                log(bid, "ERR", f"verificar {order_id}: {e}")
+
+    async def send_payment(message, items_desc=None, items=None, user=None):
         ptype = (payment or {}).get("type") or ""
+        if ptype in ("pix", "api") and items_desc:
+            await message.reply_text(f"🧾 *Resumo da compra:*\n{items_desc}", parse_mode="Markdown")
         if ptype == "pix":
-            if items_desc:
-                await message.reply_text(f"🧾 *Resumo da compra:*\n{items_desc}", parse_mode="Markdown")
             key = payment.get("pix_key") or "(chave não configurada)"
             await message.reply_text(f"💳 *Chave Pix* (toque para copiar):\n`{key}`", parse_mode="Markdown")
             pname = payment.get("pix_name") or ""
@@ -251,12 +461,13 @@ def build_app(bot):
             qimg = get_image(qr)
             if qimg:
                 await message.reply_photo(photo=io.BytesIO(qimg[1]), caption="📷 QR Code Pix")
-        elif ptype == "api":
-            await message.reply_text("Pagamento automático ainda não disponível. Em breve!")
+        elif ptype == "api" and items and user:
+            await api_checkout(message, user, items)
         else:
             await message.reply_text("Pagamento não configurado — fale com o vendedor.")
 
-    async def do_checkout(message, uid):
+    async def do_checkout(message, user):
+        uid = user.id
         items = carts.get(uid) or []
         if not items:
             await message.reply_text("Seu carrinho está vazio. Adicione produtos no Catálogo antes de finalizar a compra.")
@@ -265,7 +476,7 @@ def build_app(bot):
         resumo = "\n".join(f"- {p.get('name')} ({p.get('price') or ''})" for p in items)
         marca = "🟢 " if len(items) > 1 else ""
         resumo += f"\n\n{marca}*Total: {fmt_price(total)}*"
-        await send_payment(message, resumo)
+        await send_payment(message, resumo, items=items, user=user)
         carts[uid] = []
 
     def make_cmd_payment(name, pay):
@@ -273,7 +484,7 @@ def build_app(bot):
             if not await allowed(update):
                 await update.message.reply_text("Somente administradores.")
                 return
-            await do_checkout(update.message, update.effective_user.id)
+            await do_checkout(update.message, update.effective_user)
             log(bid, "CMD", f"/{name} (finalizar compra) de {update.effective_user.id}")
         return h
 
@@ -359,7 +570,10 @@ def build_app(bot):
             await on_cart(update, ctx)
             return
         if txt == "✅ Finalizar compra":
-            await do_checkout(msg, u.id)
+            await do_checkout(msg, u)
+            return
+        if u.id in pay_state:
+            await on_pay_step(msg, u, txt)
             return
         low = txt.lower()
         if banned & set(re.findall(r"\w+", low)):
@@ -412,13 +626,33 @@ def build_app(bot):
             await q.answer()
             if 0 <= idx < len(products):
                 p = products[idx]
-                await send_payment(q.message, f"- *{p.get('name')}* — *{p.get('price') or ''}*")
+                await send_payment(q.message, f"- *{p.get('name')}* — *{p.get('price') or ''}*", items=[p], user=u)
                 log(bid, "COMPRA", f"{u.id} comprou direto {p.get('name')}")
             return
         if data == "checkout":
             await q.answer()
-            await do_checkout(q.message, u.id)
+            await do_checkout(q.message, u)
             log(bid, "COMPRA", f"{u.id} finalizou carrinho")
+            return
+        if data.startswith("pixchk|"):
+            order_id = data.split("|", 1)[1]
+            await q.answer()
+            status = order_paid(order_id, bid)
+            if status is None:
+                await q.message.reply_text("Pedido não encontrado.")
+            elif status:
+                await q.message.reply_text("✅ Esse pagamento já foi confirmado.")
+            else:
+                try:
+                    pago = await pagbank_is_paid(payment, order_id)
+                except Exception as e:
+                    log(bid, "ERR", f"verificar {order_id}: {e}")
+                    await q.message.reply_text("⚠️ Não consegui verificar agora. Tente de novo.")
+                    return
+                if pago:
+                    await notify_paid(ctx.bot, order_id)
+                else:
+                    await q.message.reply_text("⏳ Pagamento ainda não identificado. Aguarde alguns segundos e toque em verificar de novo.")
             return
         if data == "clearcart":
             carts[u.id] = []
@@ -454,6 +688,7 @@ def build_app(bot):
     a.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     cmd_meta = [(n, f"Comando /{n}") for n in cmds]
     a.bot_data["cmd_names"] = cmd_meta
+    a.bot_data["check_pending"] = check_pending
     return a
 
 class Worker:
@@ -481,8 +716,15 @@ class Worker:
             await a.start()
             await a.updater.start_polling(allowed_updates=Update.ALL_TYPES)
             log(bid, "SYS", f"online como @{a.bot.username}")
+            ticks = 0
             while not self.stop.is_set():
                 await asyncio.sleep(0.5)
+                ticks += 1
+                if ticks % 60 == 0:  # a cada 30s confere os Pix pendentes
+                    try:
+                        await a.bot_data["check_pending"](a.bot)
+                    except Exception as e:
+                        log(bid, "ERR", f"verificador de pagamentos: {e}")
             await a.updater.stop()
             await a.stop()
         finally:
@@ -635,6 +877,20 @@ def api_update(bid):
         b = next((x for x in bots if x["id"] == bid), None)
         if not b:
             return jsonify(ok=False, err="Bot não encontrado"), 404
+        if "payment" in body:
+            # O navegador nunca recebe o token do PagBank: campo vazio = manter o token salvo.
+            newp = dict(body.get("payment") or {})
+            oldp = b.get("payment") or {}
+            newp.pop("pagbank_token_hint", None)
+            tok = (newp.get("pagbank_token") or "").strip() or oldp.get("pagbank_token", "")
+            env = "producao" if newp.get("pagbank_env") == "producao" else "sandbox"
+            newp["pagbank_token"], newp["pagbank_env"] = tok, env
+            changed = tok != oldp.get("pagbank_token", "") or env != (oldp.get("pagbank_env") or "sandbox")
+            if newp.get("type") == "api" and tok and changed and pagbank_token_ok(tok, env) is False:
+                modo = "produção" if env == "producao" else "sandbox (testes)"
+                return jsonify(ok=False, err=f"O PagBank recusou esse token no modo {modo}. "
+                                             "Confira o token e o ambiente escolhido."), 400
+            body = {**body, "payment": newp}
         for k in EDITABLE:
             if k in body:
                 b[k] = body[k]

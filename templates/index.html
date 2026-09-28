@@ -107,7 +107,7 @@ const ACTION_META={
  'link':{label:'Abrir link',desc:'Envia um botão que abre um site ou link externo ao clicar.'},
  'contact':{label:'Pedir contato',desc:'Mostra um botão para o usuário compartilhar o telefone dele com o bot.'},
  'location':{label:'Pedir localização',desc:'Mostra um botão para o usuário compartilhar a localização dele com o bot.'},
- 'payment':{label:'Finalizar compra',desc:'Envia o resumo do carrinho (itens + total), depois a chave Pix para copiar, os dados do recebedor e por último o QR Code, na ordem.'}
+ 'payment':{label:'Finalizar compra',desc:'Envia o resumo do carrinho (itens + total) e o pagamento: no modo chave Pix manda a chave, o recebedor e o QR Code; no modo automático (API) gera um Pix do PagBank com o valor exato e confirma sozinho.'}
 };
 const MODE_META={
  'contains':{label:'contém',desc:'A resposta dispara quando a mensagem do usuário contém essa palavra ou frase em qualquer parte do texto.'},
@@ -115,7 +115,7 @@ const MODE_META={
 };
 const PAY_META={
  '':{label:'Nenhum',desc:'Pagamento desativado — o bot não vai enviar nenhuma opção de pagamento.'},
- 'api':{label:'Atendimento automático (API bancária)',desc:'Em breve: cobrança automática via API de banco/gateway, com confirmação sozinha. Ainda não implementado nesta versão.'},
+ 'api':{label:'Atendimento automático (API bancária)',desc:'Pix automático pelo PagBank: o bot pede nome, CPF e e-mail do cliente, gera o QR Code com o valor exato, confirma o pagamento sozinho e avisa você e o cliente.'},
  'pix':{label:'Atendimento direto (chave Pix)',desc:'O bot envia sua chave Pix e instruções; o cliente paga manualmente e você confirma o recebimento por fora.'}
 };
 let bots=[],sel=null,tab='t_cmd';
@@ -255,7 +255,15 @@ function payBlock(b){
    +'<label>Instruções para o cliente</label><textarea id="pay_instructions" rows="3" placeholder="Ex: envie o comprovante aqui depois de pagar.">'+esc(b.payment.instructions||'')+'</textarea>'
    +'<label>Imagem do QR Code (opcional)</label><div class="row" style="align-items:center">'+thumb+'<input type="file" accept="image/*" onchange="uploadQr(this)"></div>';
  }else if(t==='api'){
-  extra='<p class="mut">Essa opção ainda não está implementada nesta versão — em breve.</p>';
+  const env=b.payment.pagbank_env||'sandbox';
+  const hint=b.payment.pagbank_token_hint||'';
+  extra='<label>Ambiente do PagBank</label><select id="pay_env">'
+   +'<option value="sandbox"'+(env!=='producao'?' selected':'')+'>Sandbox (testes, sem dinheiro real)</option>'
+   +'<option value="producao"'+(env==='producao'?' selected':'')+'>Produção (vendas reais)</option></select>'
+   +'<label>Token da API do PagBank</label><input id="pay_token" type="password" autocomplete="off" value="'+esc(b.payment.pagbank_token||'')+'" placeholder="'+(hint?'Token salvo (termina em '+esc(hint)+'). Deixe em branco para manter.':'Cole aqui o token do PagBank')+'">'
+   +'<small class="tip">Onde pegar: acesso.pagbank.com.br → Venda online → Integrações → Gerar Token. O token é conferido no PagBank ao salvar e nunca volta para o navegador. Para vender de verdade, sua conta precisa ter uma chave Pix cadastrada.</small>'
+   +'<label>Seu ID do Telegram (recebe o aviso de cada venda paga)</label><input id="pay_admin" value="'+esc(b.payment.admin_chat_id||'')+'" placeholder="Ex: 123456789 — descubra com o @userinfobot">'
+   +'<small class="tip">Mande /start para o seu próprio bot uma vez; sem isso o Telegram não deixa ele te enviar o aviso.</small>';
  }
  return '<h2>Pagamento</h2><p class="mut">Escolha como o bot trata pagamentos. Depois, crie um comando na aba Comandos com a ação "Finalizar compra" para o cliente acionar.</p>'
   +'<label>Tipo</label><select id="pay_type" onchange="collect();renderEditor()">'
@@ -321,6 +329,9 @@ function collect(){ // lê os campos da tela para o objeto local; devolve false 
   if($('pay_pixkey'))b.payment.pix_key=$('pay_pixkey').value;
   if($('pay_pixname'))b.payment.pix_name=$('pay_pixname').value;
   if($('pay_instructions'))b.payment.instructions=$('pay_instructions').value;
+  if($('pay_env'))b.payment.pagbank_env=$('pay_env').value;
+  if($('pay_token'))b.payment.pagbank_token=$('pay_token').value.trim();
+  if($('pay_admin'))b.payment.admin_chat_id=$('pay_admin').value.trim();
  }
  return true}
 function add(list,obj){if(!collect())return;cur()[list].push(obj);renderEditor()}
