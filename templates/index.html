@@ -182,12 +182,14 @@ function cmdRows(b){
 async function uploadCmdImage(input,i){
  if(!input.files||!input.files[0])return;
  if(!collect())return;
- const fd=new FormData();fd.append('image',input.files[0]);
- const r=await fetch('/api/upload_image',{method:'POST',body:fd});
- const j=await r.json();
- if(!j.ok){alert(j.err);return}
- cur().commands[i].image=j.filename;
- renderEditor()}
+ try{
+  const fd=new FormData();fd.append('image',input.files[0]);
+  const r=await fetch('/api/upload_image',{method:'POST',body:fd});
+  const j=await r.json();
+  if(!j.ok){alert('Erro ao enviar imagem: '+j.err);return}
+  cur().commands[i].image=j.filename;
+  renderEditor()
+ }catch(e){alert('Falha ao enviar imagem (erro '+(e&&e.message||e)+')')}}
 
 function catGroups(b){
  const groups=new Map();
@@ -233,12 +235,14 @@ function newCategory(){
 async function uploadProdImage(input,i){
  if(!input.files||!input.files[0])return;
  if(!collect())return;
- const fd=new FormData();fd.append('image',input.files[0]);
- const r=await fetch('/api/upload_image',{method:'POST',body:fd});
- const j=await r.json();
- if(!j.ok){alert(j.err);return}
- cur().products[i].image=j.filename;
- renderEditor()}
+ try{
+  const fd=new FormData();fd.append('image',input.files[0]);
+  const r=await fetch('/api/upload_image',{method:'POST',body:fd});
+  const j=await r.json();
+  if(!j.ok){alert('Erro ao enviar imagem: '+j.err);return}
+  cur().products[i].image=j.filename;
+  renderEditor()
+ }catch(e){alert('Falha ao enviar imagem (erro '+(e&&e.message||e)+')')}}
 
 function payBlock(b){
  b.payment=b.payment||{type:'',pix_key:'',pix_name:'',instructions:'',qr_image:''};
@@ -262,12 +266,14 @@ function payBlock(b){
 async function uploadQr(input){
  if(!input.files||!input.files[0])return;
  if(!collect())return;
- const fd=new FormData();fd.append('image',input.files[0]);
- const r=await fetch('/api/upload_image',{method:'POST',body:fd});
- const j=await r.json();
- if(!j.ok){alert(j.err);return}
- cur().payment.qr_image=j.filename;
- renderEditor()}
+ try{
+  const fd=new FormData();fd.append('image',input.files[0]);
+  const r=await fetch('/api/upload_image',{method:'POST',body:fd});
+  const j=await r.json();
+  if(!j.ok){alert('Erro ao enviar imagem: '+j.err);return}
+  cur().payment.qr_image=j.filename;
+  renderEditor()
+ }catch(e){alert('Falha ao enviar imagem (erro '+(e&&e.message||e)+')')}}
 
 function renderEditor(){
  const b=cur();
