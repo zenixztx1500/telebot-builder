@@ -15,11 +15,20 @@ Abra http://127.0.0.1:5000
 3. Configure comandos, respostas automáticas, botões, filtros e permissões e clique em Salvar (o bot reinicia sozinho).
 4. A aba Log mostra o que o bot recebeu e enviou. Se aparecer ERR, o token ou a internet estão com problema.
 
-## Pagamento automático (Pix via PagBank)
-Na aba **Pagamento**, escolha "Atendimento automático (API bancária)":
-1. Escolha o ambiente: **Sandbox** (testes) ou **Produção** (vendas reais).
-2. Cole o token do PagBank (acesso.pagbank.com.br → Venda online → Integrações → Gerar Token). Ele é conferido ao salvar e nunca volta para o navegador.
-3. Informe seu ID do Telegram para receber o aviso de cada venda paga (mande /start para o seu bot uma vez).
+## Pagamento automático (Pix por API)
+Na aba **Pagamento**, escolha "Atendimento automático (API de pagamento)" e o intermediador:
+
+| Intermediador | Onde pegar o token | Testes |
+|---|---|---|
+| **PagBank** | acesso.pagbank.com.br → Venda online → Integrações → Gerar Token | Ambiente Sandbox. Produção exige liberação da API pelo suporte do PagBank |
+| **Mercado Pago** | mercadopago.com.br/developers → Suas integrações → Credenciais → Access Token | Token `TEST-...` = testes, `APP_USR-...` = vendas reais |
+| **Asaas** | Integrações → Chave de API (`$aact_...`) | Ambiente Sandbox (conta em sandbox.asaas.com) |
+
+1. Cole o token e clique em **Testar token**: ele é conferido no intermediador (e o painel avisa se for token de testes no modo produção ou vice-versa). O token nunca volta para o navegador.
+2. Informe seu ID do Telegram para receber o aviso de cada venda paga (mande /start para o seu bot uma vez).
+3. A conta no intermediador precisa ter uma chave Pix cadastrada.
+
+Bancos tradicionais (Itaú, Bradesco, BB, Santander...) não estão na lista porque a API Pix deles exige contrato de empresa e certificado digital, não só um token.
 
 No bot, o cliente informa nome, CPF e e-mail na primeira compra, recebe o QR Code e o Pix copia e cola com o valor exato, e o pagamento é confirmado sozinho (verificação a cada 30s; os pedidos ficam na tabela `pix_orders`).
 

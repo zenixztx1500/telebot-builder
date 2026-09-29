@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """TeleBot Builder - painel Flask multi-cliente (contas + Postgres) para criar e gerenciar bots do Telegram."""
-import asyncio, io, json, os, re, threading, time, uuid, urllib.request, urllib.error
+import asyncio, base64, datetime, io, json, os, re, threading, time, uuid, urllib.request, urllib.error
 import httpx  # importar aqui (thread principal) evita erro de módulo parcialmente inicializado quando vários bots sobem ao mesmo tempo
 import anyio._backends._asyncio  # idem: o anyio carrega esse backend sob demanda e várias threads ao mesmo tempo quebram o import
 from functools import wraps
@@ -132,12 +132,16 @@ def log(bid, kind, text):
         f.write(f"[{time.strftime('%H:%M:%S')}] {kind}: {text}\n")
 
 def public(b):
-    """Nunca devolve o token completo (nem o do PagBank) para o navegador."""
+    """Nunca devolve o token completo (nem o do intermediador de pagamento) para o navegador."""
     out = {k: v for k, v in b.items() if k != "token"}
     out["token_hint"] = b["token"].split(":")[0] + ":..." + b["token"][-4:]
-    pay = dict(b.get("payment") or {})
-    tok = pay.pop("pagbank_token", "")
-    pay["pagbank_token_hint"] = ("..." + tok[-4:]) if tok else ""
+    raw = b.get("payment") or {}
+    pay = {k: v for k, v in raw.items() if k not in ("api_token", "pagbank_token", "pagbank_env")}
+    tok = gw_token(raw)
+    pay["api_token_hint"] = ("..." + tok[-4:]) if tok else ""
+    pay["gateway"] = gw_name(raw)
+    pay["api_token_gateway"] = pay["gateway"] if tok else ""
+    pay["api_env"] = mp_env_from_token(tok) if pay["gateway"] == "mercadopago" and tok else gw_env(raw)
     out["payment"] = pay
     return out
 
@@ -180,63 +184,170 @@ def cpf_ok(cpf):
 def email_ok(email):
     return re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) is not None
 
-# ---------------- PagBank (pagamento automático por token de API) ----------------
-PAGBANK_URLS = {"producao": "https://api.pagseguro.com", "sandbox": "https://sandbox.api.pagseguro.com"}
+# ---------------- Pix automático por token de API (PagBank, Mercado Pago, Asaas) ----------------
+# Cada intermediador implementa: token_ok (sync), create (async) e is_paid (async).
+# create devolve (id_da_cobrança, copia_e_cola, qr) onde qr é bytes do PNG ou URL da imagem.
+GATEWAYS = {
+    "pagbank": {"label": "PagBank", "has_env": True,
+                "urls": {"producao": "https://api.pagseguro.com", "sandbox": "https://sandbox.api.pagseguro.com"}},
+    "mercadopago": {"label": "Mercado Pago", "has_env": False,  # o próprio token diz o modo (TEST-... = testes)
+                    "urls": {"producao": "https://api.mercadopago.com", "sandbox": "https://api.mercadopago.com"}},
+    "asaas": {"label": "Asaas", "has_env": True,
+              "urls": {"producao": "https://api.asaas.com/v3", "sandbox": "https://api-sandbox.asaas.com/v3"}},
+}
+UA = "TeleBotBuilder/1.0"
 
-def pagbank_url(pay):
-    return PAGBANK_URLS["producao" if (pay or {}).get("pagbank_env") == "producao" else "sandbox"]
+def gw_name(pay):
+    g = (pay or {}).get("gateway")
+    return g if g in GATEWAYS else "pagbank"
 
-def pagbank_headers(pay):
-    return {"Authorization": f"Bearer {pay.get('pagbank_token', '')}",
-            "Content-Type": "application/json", "Accept": "application/json"}
+def gw_token(pay):
+    pay = pay or {}
+    return pay.get("api_token") or pay.get("pagbank_token", "")  # pagbank_token = formato antigo
 
-def pagbank_token_ok(token, env):
-    """Consulta um pedido inexistente: só 401/403 significam token recusado. None = sem conexão."""
-    url = PAGBANK_URLS["producao" if env == "producao" else "sandbox"]
+def gw_env(pay):
+    pay = pay or {}
+    return "producao" if (pay.get("api_env") or pay.get("pagbank_env")) == "producao" else "sandbox"
+
+def gw_url(gw, env):
+    return GATEWAYS[gw]["urls"]["producao" if env == "producao" else "sandbox"]
+
+def gw_headers(gw, token):
+    if gw == "asaas":
+        return {"access_token": token, "Content-Type": "application/json", "User-Agent": UA}
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Accept": "application/json"}
+
+def mp_env_from_token(token):
+    return "sandbox" if token.startswith("TEST-") else "producao"
+
+def order_key(gw, charge_id):
+    """Guarda o intermediador junto com o id (pedidos antigos, sem prefixo, são do PagBank)."""
+    return str(charge_id) if gw == "pagbank" else f"{gw}:{charge_id}"
+
+def split_order_key(key):
+    gw, _, cid = key.partition(":")
+    return (gw, cid) if cid and gw in GATEWAYS else ("pagbank", key)
+
+def _fail(gw, r):
+    raise RuntimeError(f"{GATEWAYS[gw]['label']} {r.status_code}: {r.text[:300]}")
+
+def gateway_token_ok(gw, token, env):
+    """True = aceito, False = recusado (401/403), None = sem conexão."""
+    base, h = gw_url(gw, env), gw_headers(gw, token)
+    probe = {"pagbank": f"{base}/orders/ORDE_00000000-0000-0000-0000-000000000000",
+             "mercadopago": f"{base}/users/me",
+             "asaas": f"{base}/customers?limit=1"}[gw]
     try:
-        r = httpx.get(f"{url}/orders/ORDE_00000000-0000-0000-0000-000000000000",
-                      headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=15)
+        r = httpx.get(probe, headers=h, timeout=15)
     except Exception:
         return None
     return r.status_code not in (401, 403)
 
-def pagbank_diagnose(token, env):
-    """Devolve (True/False/None, mensagem para o painel). Detecta token de sandbox usado em produção e vice-versa."""
-    modo = "produção" if env == "producao" else "sandbox (testes)"
-    res = pagbank_token_ok(token, env)
+def gateway_diagnose(gw, token, env):
+    """(True/False/None, mensagem para o painel). Detecta token de testes usado em produção e vice-versa."""
+    label = GATEWAYS[gw]["label"]
+    res = gateway_token_ok(gw, token, env)
     if res is None:
-        return None, "Não consegui falar com o PagBank agora. Tente de novo em instantes."
+        return None, f"Não consegui falar com o {label} agora. Tente de novo em instantes."
+    if not GATEWAYS[gw]["has_env"]:
+        modo = "testes" if mp_env_from_token(token) == "sandbox" else "produção (vendas reais)"
+        return (True, f"Token aceito pelo {label} (modo {modo}).") if res else \
+               (False, f"O {label} recusou esse token. Use o Access Token (começa com APP_USR- ou TEST-).")
+    modo = "produção" if env == "producao" else "sandbox (testes)"
     if res:
-        return True, f"Token aceito pelo PagBank no modo {modo}."
+        return True, f"Token aceito pelo {label} no modo {modo}."
     outro = "sandbox" if env == "producao" else "producao"
-    if pagbank_token_ok(token, outro):
+    if gateway_token_ok(gw, token, outro):
         certo = "Sandbox (testes)" if outro == "sandbox" else "Produção"
         return False, f"Esse token é do modo {certo}. Mude o Ambiente para {certo} e salve de novo."
-    return False, f"O PagBank recusou esse token no modo {modo}. Copie o token de novo, inteiro e sem espaços."
+    return False, f"O {label} recusou esse token no modo {modo}. Copie o token de novo, inteiro e sem espaços."
 
-async def pagbank_create_pix(pay, reference, customer, lines):
-    """lines = [(nome, qtd, centavos)]. Devolve (order_id, copia_e_cola, url_png_do_qr)."""
+async def _pagbank_create(base, h, reference, customer, lines, total):
     body = {
         "reference_id": reference,
         "customer": {"name": customer["nome"], "email": customer["email"], "tax_id": customer["cpf"]},
         "items": [{"name": n, "quantity": q, "unit_amount": c} for n, q, c in lines],
-        "qr_codes": [{"amount": {"value": sum(q * c for _, q, c in lines)}}],
+        "qr_codes": [{"amount": {"value": total}}],
     }
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(f"{pagbank_url(pay)}/orders", headers=pagbank_headers(pay), json=body)
+        r = await client.post(f"{base}/orders", headers=h, json=body)
     if r.status_code not in (200, 201):
-        raise RuntimeError(f"PagBank {r.status_code}: {r.text[:300]}")
+        _fail("pagbank", r)
     d = r.json()
     qr = d["qr_codes"][0]
     png = next((l.get("href") for l in qr.get("links", []) if l.get("rel") == "QRCODE.PNG"), None)
     return d["id"], qr["text"], png
 
-async def pagbank_is_paid(pay, order_id):
+async def _mercadopago_create(base, h, reference, customer, lines, total):
+    nome = customer["nome"].split()
+    body = {
+        "transaction_amount": round(total / 100, 2),
+        "description": ", ".join(f"{q}x {n}" for n, q, _ in lines)[:250],
+        "payment_method_id": "pix",
+        "external_reference": reference,
+        "payer": {"email": customer["email"], "first_name": nome[0], "last_name": " ".join(nome[1:]) or nome[0],
+                  "identification": {"type": "CPF", "number": customer["cpf"]}},
+    }
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{pagbank_url(pay)}/orders/{order_id}", headers=pagbank_headers(pay))
+        r = await client.post(f"{base}/v1/payments", headers={**h, "X-Idempotency-Key": reference}, json=body)
+    if r.status_code not in (200, 201):
+        _fail("mercadopago", r)
+    d = r.json()
+    td = d["point_of_interaction"]["transaction_data"]
+    png = base64.b64decode(td["qr_code_base64"]) if td.get("qr_code_base64") else td.get("ticket_url")
+    return d["id"], td["qr_code"], png
+
+async def _asaas_create(base, h, reference, customer, lines, total):
+    async with httpx.AsyncClient(timeout=30) as client:
+        # reaproveita o cliente pelo CPF para não duplicar cadastro a cada compra
+        r = await client.get(f"{base}/customers", headers=h, params={"cpfCnpj": customer["cpf"]})
+        found = r.json().get("data") if r.status_code == 200 else None
+        if found:
+            cust_id = found[0]["id"]
+        else:
+            r = await client.post(f"{base}/customers", headers=h, json={
+                "name": customer["nome"], "cpfCnpj": customer["cpf"], "email": customer["email"]})
+            if r.status_code not in (200, 201):
+                _fail("asaas", r)
+            cust_id = r.json()["id"]
+        r = await client.post(f"{base}/payments", headers=h, json={
+            "customer": cust_id, "billingType": "PIX", "value": round(total / 100, 2),
+            "dueDate": datetime.date.today().isoformat(), "externalReference": reference,
+            "description": ", ".join(f"{q}x {n}" for n, q, _ in lines)[:500]})
+        if r.status_code not in (200, 201):
+            _fail("asaas", r)
+        pay_id = r.json()["id"]
+        r = await client.get(f"{base}/payments/{pay_id}/pixQrCode", headers=h)
+        if r.status_code != 200:
+            _fail("asaas", r)
+        d = r.json()
+    return pay_id, d["payload"], base64.b64decode(d["encodedImage"]) if d.get("encodedImage") else None
+
+async def gateway_create_pix(pay, reference, customer, lines):
+    """lines = [(nome, qtd, centavos)]. Devolve (chave_do_pedido, copia_e_cola, qr_bytes_ou_url)."""
+    gw, tok = gw_name(pay), gw_token(pay)
+    env = mp_env_from_token(tok) if gw == "mercadopago" else gw_env(pay)
+    create = {"pagbank": _pagbank_create, "mercadopago": _mercadopago_create, "asaas": _asaas_create}[gw]
+    cid, copia, qr = await create(gw_url(gw, env), gw_headers(gw, tok), reference, customer, lines,
+                                  sum(q * c for _, q, c in lines))
+    return order_key(gw, cid), copia, qr
+
+async def gateway_is_paid(pay, key):
+    gw, cid = split_order_key(key)
+    tok = gw_token(pay)
+    env = mp_env_from_token(tok) if gw == "mercadopago" else gw_env(pay)
+    base, h = gw_url(gw, env), gw_headers(gw, tok)
+    path = {"pagbank": f"/orders/{cid}", "mercadopago": f"/v1/payments/{cid}", "asaas": f"/payments/{cid}"}[gw]
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(base + path, headers=h)
     if r.status_code != 200:
-        raise RuntimeError(f"PagBank {r.status_code}: {r.text[:300]}")
-    return any(ch.get("status") == "PAID" for ch in r.json().get("charges", []))
+        _fail(gw, r)
+    d = r.json()
+    if gw == "pagbank":
+        return any(ch.get("status") == "PAID" for ch in d.get("charges", []))
+    if gw == "mercadopago":
+        return d.get("status") == "approved"
+    return d.get("status") in ("RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH")
 
 # ---------------- Bot ----------------
 def build_app(bot):
@@ -354,7 +465,7 @@ def build_app(bot):
     customers = {}  # user_id -> {"nome", "cpf", "email"}; fica só na memória (pergunta de novo após reiniciar)
 
     def cart_lines(items):
-        """Agrupa itens iguais -> [(nome, qtd, centavos)] para o PagBank."""
+        """Agrupa itens iguais -> [(nome, qtd, centavos)] para o intermediador de pagamento."""
         grouped = {}
         for p in items:
             k = ((p.get("name") or "Produto")[:64], int(round(parse_price(p.get("price")) * 100)))
@@ -367,21 +478,26 @@ def build_app(bot):
                    f"E-mail: {customer['email']}\n\n"
                    + "\n".join(f"{q}x {n}" for n, q, _ in lines) + f"\n\nTotal: {fmt_price(total / 100)}")
         try:
-            order_id, copia, png = await pagbank_create_pix(
+            order_id, copia, qr = await gateway_create_pix(
                 payment, f"{bid}-{user.id}-{uuid.uuid4().hex[:8]}", customer, lines)
         except Exception as e:
             log(bid, "ERR", f"Pix: {e}")
             await message.reply_text("⚠️ Não consegui gerar o Pix agora. Tente de novo em instantes.")
             return
-        save_order(order_id, bid, message.chat_id, summary, total)
+        try:
+            save_order(order_id, bid, message.chat_id, summary, total)
+        except Exception as e:  # a cobrança já existe: entrega o Pix mesmo assim, só a confirmação automática fica sem registro
+            log(bid, "ERR", f"salvar pedido {order_id}: {e}")
         log(bid, "PIX", f"{user.id} pedido {order_id} {fmt_price(total / 100)}")
         await message.reply_text(f"💳 Pedido criado! Total: {fmt_price(total / 100)}")
-        if png:
+        if qr:
             try:
-                # Baixa a imagem aqui (mais confiável do que o Telegram buscar o link sozinho).
-                async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-                    r = await client.get(png)
-                foto = io.BytesIO(r.content) if r.status_code == 200 and r.content else png
+                if isinstance(qr, bytes):  # Mercado Pago e Asaas já devolvem a imagem
+                    foto = io.BytesIO(qr)
+                else:  # PagBank devolve um link: baixa aqui (mais confiável do que o Telegram buscar sozinho)
+                    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+                        r = await client.get(qr)
+                    foto = io.BytesIO(r.content) if r.status_code == 200 and r.content else qr
                 await message.reply_photo(photo=foto, caption="📷 Escaneie o QR Code no app do seu banco.")
             except Exception as e:
                 log(bid, "WARN", f"imagem do QR: {e}")
@@ -393,7 +509,7 @@ def build_app(bot):
                                                                      callback_data=f"pixchk|{order_id}")]]))
 
     async def api_checkout(message, user, items):
-        if not payment.get("pagbank_token"):
+        if not gw_token(payment):
             await message.reply_text("Pagamento automático não configurado — fale com o vendedor.")
             return
         lines = cart_lines(items)
@@ -455,11 +571,11 @@ def build_app(bot):
 
     async def check_pending(bot_api):
         """Chamado pelo Worker a cada 30s: confirma pagamentos sem o cliente precisar tocar em nada."""
-        if payment.get("type") != "api" or not payment.get("pagbank_token"):
+        if payment.get("type") != "api" or not gw_token(payment):
             return
         for order_id in pending_orders(bid):
             try:
-                if await pagbank_is_paid(payment, order_id):
+                if await gateway_is_paid(payment, order_id):
                     await notify_paid(bot_api, order_id)
             except Exception as e:
                 log(bid, "ERR", f"verificar {order_id}: {e}")
@@ -663,7 +779,7 @@ def build_app(bot):
                 await q.message.reply_text("✅ Esse pagamento já foi confirmado.")
             else:
                 try:
-                    pago = await pagbank_is_paid(payment, order_id)
+                    pago = await gateway_is_paid(payment, order_id)
                 except Exception as e:
                     log(bid, "ERR", f"verificar {order_id}: {e}")
                     await q.message.reply_text("⚠️ Não consegui verificar agora. Tente de novo.")
@@ -898,23 +1014,30 @@ def api_update(bid):
             return jsonify(ok=False, err="Bot não encontrado"), 404
         warn = None
         if "payment" in body:
-            # O navegador nunca recebe o token do PagBank: campo vazio = manter o token salvo.
-            newp = dict(body.get("payment") or {})
+            # O navegador nunca recebe o token: campo vazio = manter o token salvo (se o intermediador não mudou).
+            newp = {k: v for k, v in (body.get("payment") or {}).items()
+                    if k not in ("api_token_hint", "api_token_gateway", "pagbank_token_hint", "pagbank_token", "pagbank_env")}
             oldp = b.get("payment") or {}
-            newp.pop("pagbank_token_hint", None)
-            tok = (newp.get("pagbank_token") or "").strip() or oldp.get("pagbank_token", "")
-            env = "producao" if newp.get("pagbank_env") == "producao" else "sandbox"
-            newp["pagbank_token"], newp["pagbank_env"] = tok, env
-            changed = tok != oldp.get("pagbank_token", "") or env != (oldp.get("pagbank_env") or "sandbox")
+            gw = newp.get("gateway") if newp.get("gateway") in GATEWAYS else "pagbank"
+            old_gw = gw_name(oldp)
+            typed = (newp.get("api_token") or "").strip()
+            tok = typed or (gw_token(oldp) if gw == old_gw else "")
+            env = "producao" if newp.get("api_env") == "producao" else "sandbox"
+            if gw == "mercadopago" and tok:
+                env = mp_env_from_token(tok)
+            newp.update(gateway=gw, api_token=tok, api_env=env)
+            changed = tok != gw_token(oldp) or env != gw_env(oldp) or gw != old_gw
+            label = GATEWAYS[gw]["label"]
             if newp.get("type") == "api" and tok and changed:
-                res, msg = pagbank_diagnose(tok, env)
+                res, msg = gateway_diagnose(gw, tok, env)
                 if res is False:
-                    # Salva todo o resto; só o token/ambiente novos ficam de fora.
-                    newp["pagbank_token"] = oldp.get("pagbank_token", "")
-                    newp["pagbank_env"] = oldp.get("pagbank_env") or "sandbox"
+                    # Salva todo o resto; só o intermediador/token/ambiente novos ficam de fora.
+                    newp.update(gateway=old_gw, api_token=gw_token(oldp), api_env=gw_env(oldp))
                     warn = "Tudo foi salvo, menos o token. " + msg
                 elif res is None:
-                    warn = "Salvo, mas não deu para conferir o token no PagBank agora."
+                    warn = f"Salvo, mas não deu para conferir o token no {label} agora."
+            elif newp.get("type") == "api" and not tok:
+                warn = f"Salvo. Falta colar o token do {label} para o Pix automático funcionar."
             body = {**body, "payment": newp}
         for k in EDITABLE:
             if k in body:
@@ -924,19 +1047,21 @@ def api_update(bid):
     start_worker(uid, bid)  # reinicia se estiver ativo; se pausado, só para
     return jsonify(ok=True, warn=warn)
 
-@app.route("/api/bots/<bid>/pagbank_test", methods=["POST"])
+@app.route("/api/bots/<bid>/payment_test", methods=["POST"])
 @login_required
-def api_pagbank_test(bid):
+def api_payment_test(bid):
     """Botão 'Testar token' do painel: confere o token digitado (ou o salvo) sem salvar nada."""
     d = request.get_json(force=True) or {}
     b = next((x for x in load_bots(session["uid"]) if x["id"] == bid), None)
     if not b:
         return jsonify(ok=False, err="Bot não encontrado"), 404
+    gw = d.get("gateway") if d.get("gateway") in GATEWAYS else "pagbank"
     env = "producao" if d.get("env") == "producao" else "sandbox"
-    tok = (d.get("token") or "").strip() or (b.get("payment") or {}).get("pagbank_token", "")
+    oldp = b.get("payment") or {}
+    tok = (d.get("token") or "").strip() or (gw_token(oldp) if gw == gw_name(oldp) else "")
     if not tok:
-        return jsonify(ok=False, err="Cole o token do PagBank primeiro.")
-    res, msg = pagbank_diagnose(tok, env)
+        return jsonify(ok=False, err=f"Cole o token do {GATEWAYS[gw]['label']} primeiro.")
+    res, msg = gateway_diagnose(gw, tok, env)
     return jsonify(ok=bool(res), msg=msg, err=None if res else msg)
 
 @app.route("/api/bots/<bid>", methods=["DELETE"])
