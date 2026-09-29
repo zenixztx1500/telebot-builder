@@ -2,6 +2,7 @@
 """TeleBot Builder - painel Flask multi-cliente (contas + Postgres) para criar e gerenciar bots do Telegram."""
 import asyncio, io, json, os, re, threading, time, uuid, urllib.request, urllib.error
 import httpx  # importar aqui (thread principal) evita erro de módulo parcialmente inicializado quando vários bots sobem ao mesmo tempo
+import anyio._backends._asyncio  # idem: o anyio carrega esse backend sob demanda e várias threads ao mesmo tempo quebram o import
 from functools import wraps
 from pathlib import Path
 import psycopg2
