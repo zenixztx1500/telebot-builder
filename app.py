@@ -216,6 +216,8 @@ def pix_key_normalize(key):
             return "+55" + digits
         if len(digits) in (12, 13) and digits.startswith("55"):
             return "+" + digits
+        if len(digits) == 11 and not cpf_ok(digits):  # 11 dígitos que não fecham como CPF = celular com DDD
+            return "+55" + digits
         return digits  # CPF (11) ou CNPJ (14)
     return k
 
