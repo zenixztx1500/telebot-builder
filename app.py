@@ -957,7 +957,18 @@ def api_log(bid):
         return jsonify(ok=False, err="Bot não encontrado"), 404
     safe = re.sub(r"[^\w-]", "", bid)
     p = LOG_DIR / (safe + ".log")
-    return jsonify(p.read_text(encoding="utf-8").splitlines()[-200:] if p.exists() else [])
+    return jsonify(p.read_text(encoding="utf-8").splitlines()[-500:] if p.exists() else [])
+
+@app.route("/api/bots/<bid>/log", methods=["DELETE"])
+@login_required
+def api_log_clear(bid):
+    uid = session["uid"]
+    if not any(b["id"] == bid for b in load_bots(uid)):
+        return jsonify(ok=False, err="Bot não encontrado"), 404
+    safe = re.sub(r"[^\w-]", "", bid)
+    with LOCK:
+        (LOG_DIR / (safe + ".log")).unlink(missing_ok=True)
+    return jsonify(ok=True)
 
 # ---------------- Inicialização (roda tanto no "python app.py" quanto sob gunicorn) ----------------
 init_db()

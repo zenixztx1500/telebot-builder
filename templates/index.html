@@ -58,6 +58,27 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:
 .tabnav button:hover{background:var(--card2);color:var(--txt)}
 .tabnav button.on{background:var(--card2);color:var(--txt);border-left-color:var(--acc)}
 .tabpanel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px;min-width:0}
+/* log */
+.logbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:12px 0 10px}
+.chip{background:transparent;border:1px solid var(--line);color:var(--mut);padding:5px 11px;border-radius:20px;font-size:12.5px;font-weight:500}
+.chip:hover{color:var(--txt);background:var(--card2)}
+.chip.on{background:var(--card2);color:var(--txt);border-color:var(--acc)}
+.chip .n{margin-left:5px;opacity:.65;font-variant-numeric:tabular-nums}
+.logbar input{flex:1;min-width:170px;width:auto}
+.logbox{background:var(--bg);border:1px solid var(--line);border-radius:9px;max-height:480px;overflow:auto;font-size:12.8px}
+.logrow{display:grid;grid-template-columns:64px 112px 1fr;gap:10px;padding:7px 12px;border-bottom:1px solid rgba(35,44,58,.7);align-items:start}
+.logrow:last-child{border-bottom:0}
+.logrow.erro{background:rgba(229,84,107,.06)}
+.logrow .t{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--mut);font-size:12px;padding-top:2px}
+.logrow .k{justify-self:start;font-size:11px;font-weight:600;padding:2px 9px;border-radius:12px;white-space:nowrap}
+.logrow .m{word-break:break-word;min-width:0}
+.logrow .hint{margin-top:4px;color:#E0A84B;font-size:12.3px}
+.k.erro{background:rgba(229,84,107,.16);color:var(--bad)}
+.k.aviso{background:rgba(224,168,75,.16);color:#E0A84B}
+.k.venda{background:rgba(47,191,159,.16);color:var(--acc)}
+.k.msg{background:rgba(120,160,255,.14);color:#9DBBFF}
+.k.sys{background:var(--card2);color:var(--mut)}
+.logempty{padding:28px 16px;text-align:center;color:var(--mut)}
 /* produtos */
 .prodrow{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:start;padding:12px 0;border-top:1px solid var(--line)}
 .cmdblock>.row+.prodrow{border-top:0;padding-top:4px}
@@ -104,6 +125,8 @@ button:disabled{opacity:.6;cursor:default}
  .thumb img{width:100%!important;height:100%!important}
  .pfields .price{flex:1 1 100%}
  .toast{left:12px;right:12px;bottom:12px;max-width:none}
+ .logrow{grid-template-columns:auto 1fr;gap:6px 8px}
+ .logrow .m{grid-column:1/-1}
 }
 </style></head><body>
 <header>
@@ -352,7 +375,13 @@ function renderEditor(){
  +'</div><div class="row" style="margin-top:8px"><input id="banword" placeholder="palavra"><button class="ghost" onclick="addBan()">Adicionar</button></div>'+saveBtn+'</div>'
  +'<div id="t_perm"><h2>Permissões</h2><label><input type="checkbox" id="admin_only" '+(b.admin_only?'checked':'')+'> Somente admins do grupo / whitelist</label>'
  +'<label>Whitelist (IDs do Telegram separados por vírgula)</label><input id="whitelist" value="'+esc((b.whitelist||[]).join(', '))+'">'+saveBtn+'</div>'
- +'<div id="t_log"><pre id="logbox">carregando...</pre><button class="ghost" onclick="loadLog()">Atualizar</button></div>'
+ +'<div id="t_log"><h2>Log</h2><p class="mut">Tudo o que o bot recebe e faz, com os erros explicados.</p>'
+ +'<div class="logbar">'+LOG_FILTERS.map(([f,l])=>'<button class="chip'+(logFilter===f?' on':'')+'" data-f="'+f+'" onclick="setLogFilter(\''+f+'\')">'+l+'<span class="n"></span></button>').join('')
+ +'<input id="logq" type="search" placeholder="🔎 Buscar no log" value="'+esc(logQuery)+'" oninput="logQuery=this.value;renderLog()"></div>'
+ +'<div id="logbox" class="logbox"><div class="logempty">carregando...</div></div>'
+ +'<div class="actions" style="align-items:center;flex-wrap:wrap">'
+ +'<label style="display:flex;align-items:center;gap:6px;margin:0;font-size:13px"><input type="checkbox" '+(logAuto?'checked':'')+' onchange="logAuto=this.checked"> Atualizar sozinho (5s)</label>'
+ +'<span style="flex:1"></span><button class="ghost" onclick="loadLog()">Atualizar</button><button class="ghost" onclick="copyLog()">Copiar</button><button class="danger" onclick="clearLog()">Limpar log</button></div></div>'
  +'</div></div>';
  // o painel não é formulário de login: impede o navegador de preencher e-mail/senha salvos nos campos
  $('editor').querySelectorAll('input:not([type=file]):not([type=checkbox]),textarea').forEach(e=>e.setAttribute('autocomplete','off'));
@@ -414,7 +443,7 @@ async function testToken(btn){
  let j;try{j=await api('POST','/api/bots/'+b.id+'/pagbank_test',{token:$('pay_token').value.trim(),env:$('pay_env').value})}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
  btn.disabled=false;btn.textContent='Testar token';
  toast(j.ok?j.msg+' Agora clique em Salvar.':j.err,j.ok?'ok':'err')}
-document.addEventListener('input',e=>{if(e.target.closest('#editor')&&e.target.type!=='file')setDirty(true)});
+document.addEventListener('input',e=>{if(e.target.closest('#editor')&&!e.target.closest('#t_log')&&e.target.type!=='file')setDirty(true)});
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&cur()){e.preventDefault();save()}});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
 async function toggleEnable(){
@@ -423,7 +452,57 @@ async function toggleEnable(){
  if(!j.ok){b.enabled=!b.enabled;toast(j.err||'Erro','err');return}
  setDirty(false);toast(b.enabled?'Bot ativado ✓':'Bot pausado','ok');refresh()}
 async function delBot(){if(!confirm('Excluir este bot?'))return;await api('DELETE','/api/bots/'+sel);sel=null;refresh()}
-async function loadLog(){if(!sel)return;const l=await api('GET','/api/bots/'+sel+'/log');const p=$('logbox');if(p)p.textContent=l.join('\n')||'(vazio)'}
-setInterval(()=>{if(sel&&tab==='t_log')loadLog()},5000);
+// ---------- Log ----------
+const LOG_KIND={ERR:['erro','Erro'],WARN:['aviso','Aviso'],SYS:['sys','Sistema'],PAGO:['venda','💰 Pago'],PIX:['venda','Pix gerado'],
+ COMPRA:['venda','Compra'],CARRINHO:['venda','Carrinho'],CMD:['msg','Comando'],CATALOGO:['msg','Catálogo'],AUTO:['msg','Resposta auto'],
+ TEXT:['msg','Mensagem'],CALLBACK:['msg','Botão'],CONTATO:['msg','Contato'],LOCALIZACAO:['msg','Localização'],FILTRO:['aviso','Filtro']};
+const LOG_FILTERS=[['all','Todos'],['erro','Erros'],['venda','Vendas'],['msg','Mensagens'],['sys','Sistema']];
+const LOG_HINTS=[ // [padrão, explicação] — a primeira que casar aparece embaixo do erro
+ [/whitelist access required/i,'O PagBank ainda não liberou a API de Pix em produção para a sua conta. Peça a "liberação da API Orders com Pix em produção" ao suporte do PagBank. Enquanto isso, use o ambiente Sandbox ou o modo chave Pix.'],
+ [/PagBank 40[13]|UNAUTHORIZED|Invalid credential/i,'O PagBank recusou o token. Na aba Pagamento, use "Testar token" e confira o Ambiente (Sandbox ou Produção).'],
+ [/PagBank 400.*(tax_id|customer|email)/i,'O PagBank recusou os dados do cliente (CPF ou e-mail). Peça para o cliente conferir os dados.'],
+ [/PagBank 400/i,'O PagBank recusou o pedido. Confira se os produtos têm preço maior que zero.'],
+ [/Conflict/i,'Esse mesmo bot está ligado em outro lugar (outro computador ou servidor). Desligue a outra cópia.'],
+ [/InvalidToken|Unauthorized|Not Found.*getMe/i,'O Telegram recusou o token do bot. Gere um token novo no @BotFather e crie o bot de novo.'],
+ [/bot was blocked/i,'O cliente bloqueou o bot no Telegram.'],
+ [/chat not found/i,'O Telegram não encontrou esse chat. Se for o aviso de venda, mande /start para o seu próprio bot uma vez.'],
+ [/partially initialized module|circular import/i,'Erro interno ao iniciar. Pause e ative o bot de novo; se repetir, reinicie o serviço no Render.'],
+ [/NetworkError|TimedOut|timed out|ConnectError/i,'Falha de conexão. Se acontecer só de vez em quando é normal; se repetir sempre, pause e ative o bot.'],
+];
+let logLines=[],logFilter='all',logQuery='',logAuto=true,logShown=[];
+function parseLog(l){
+ const m=l.match(/^\[(\d\d:\d\d:\d\d)\] (\w+): ([\s\S]*)$/);
+ if(!m)return{raw:l,t:'',cls:'sys',label:'',msg:l};
+ const k=LOG_KIND[m[2]]||['sys',m[2]];
+ return{raw:l,t:m[1],cls:k[0],label:k[1],msg:m[3]}}
+const logMatch=(e,f)=>f==='all'||e.cls===f||(f==='erro'&&e.cls==='aviso');
+function renderLog(){
+ const box=$('logbox');if(!box)return;
+ const all=logLines.map(parseLog);
+ document.querySelectorAll('.chip[data-f]').forEach(c=>{c.querySelector('.n').textContent=all.filter(e=>logMatch(e,c.dataset.f)).length});
+ const q=logQuery.trim().toLowerCase();
+ const list=all.filter(e=>logMatch(e,logFilter)&&(!q||e.raw.toLowerCase().includes(q)));
+ logShown=list.map(e=>e.raw);
+ const atBottom=box.dataset.ready!=='1'||box.scrollHeight-box.scrollTop-box.clientHeight<60;
+ box.innerHTML=list.length?list.map(e=>{
+  const hint=(e.cls==='erro'||e.cls==='aviso')?(LOG_HINTS.find(([r])=>r.test(e.msg))||[])[1]:'';
+  return '<div class="logrow '+e.cls+'"><span class="t">'+esc(e.t)+'</span><span class="k '+e.cls+'">'+esc(e.label)+'</span>'
+   +'<div class="m">'+esc(e.msg)+(hint?'<div class="hint">💡 '+esc(hint)+'</div>':'')+'</div></div>'}).join('')
+  :'<div class="logempty">'+(logLines.length?'Nada encontrado com esse filtro.':'Nada por aqui ainda. Mande /start para o seu bot no Telegram e os eventos aparecem aqui.')+'</div>';
+ if(atBottom)box.scrollTop=box.scrollHeight; // só desce sozinho se você não estiver lendo mais acima
+ box.dataset.ready='1'}
+function setLogFilter(f){logFilter=f;document.querySelectorAll('.chip[data-f]').forEach(c=>c.classList.toggle('on',c.dataset.f===f));renderLog()}
+async function loadLog(){
+ if(!sel)return;
+ try{const l=await api('GET','/api/bots/'+sel+'/log');logLines=Array.isArray(l)?l:[]}catch(e){return}
+ renderLog()}
+async function copyLog(){
+ try{await navigator.clipboard.writeText(logShown.join('\n'));toast(logShown.length+' linhas copiadas ✓','ok')}
+ catch(e){toast('Não consegui copiar. Selecione o texto e use Ctrl+C.','err')}}
+async function clearLog(){
+ if(!confirm('Apagar todo o log deste bot?'))return;
+ const j=await api('DELETE','/api/bots/'+sel+'/log');
+ if(j.ok){logLines=[];renderLog();toast('Log limpo ✓','ok')}else toast(j.err||'Erro ao limpar','err')}
+setInterval(()=>{if(sel&&tab==='t_log'&&logAuto)loadLog()},5000);
 refresh();
 </script></body></html>
