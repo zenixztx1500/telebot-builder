@@ -25,13 +25,18 @@ Na aba **Pagamento**, escolha "Atendimento automático (API de pagamento)" e o i
 
 | Intermediador | Onde pegar o token | Testes |
 |---|---|---|
+| **Mercado Pago** (recomendado) | mercadopago.com.br/developers → Suas integrações → Credenciais → Access Token | Token `TEST-...` = testes, `APP_USR-...` = vendas reais |
 | **PagBank** | acesso.pagbank.com.br → Venda online → Integrações → Gerar Token | Ambiente Sandbox. Produção exige liberação da API pelo suporte do PagBank |
-| **Mercado Pago** | mercadopago.com.br/developers → Suas integrações → Credenciais → Access Token | Token `TEST-...` = testes, `APP_USR-...` = vendas reais |
 | **Asaas** | Integrações → Chave de API (`$aact_...`) | Ambiente Sandbox (conta em sandbox.asaas.com) |
 
 1. Cole o token e clique em **Testar token**: ele é conferido no intermediador (e o painel avisa se for token de testes no modo produção ou vice-versa). O token nunca volta para o navegador.
 2. Informe seu ID do Telegram para receber o aviso de cada venda paga (mande /start para o seu bot uma vez).
 3. A conta no intermediador precisa ter uma chave Pix cadastrada.
+
+A aba **🧪 Testar pagamento** gera um Pix de R$ 1,00 com a configuração salva, mostra o QR Code no próprio painel e confere sozinha se ele foi pago — sem passar pelo Telegram.
+
+## Chat limpo
+Em **Permissões e chat**, a opção "Chat limpo" (ligada por padrão) faz o bot apagar as mensagens já usadas depois de cada escolha do cliente: catálogo anterior, carrinho, perguntas respondidas e as respostas com nome, CPF e e-mail. O QR Code e o copia e cola somem quando o pagamento é confirmado. O Telegram só permite apagar mensagens com menos de 48 horas.
 
 Bancos tradicionais (Itaú, Bradesco, BB, Santander...) não estão na lista porque a API Pix deles exige contrato de empresa e certificado digital, não só um token.
 

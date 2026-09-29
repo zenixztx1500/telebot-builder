@@ -149,7 +149,7 @@ button:disabled{opacity:.6;cursor:default}
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api=(m,p,b)=>fetch(p,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined}).then(r=>r.json());
-const TABS=[['t_cmd','💬','Comandos'],['t_prod','🛍','Produtos e Serviços'],['t_pay','💳','Pagamento'],['t_auto','⚡','Respostas auto'],['t_filter','🚫','Filtros'],['t_perm','🔒','Permissões'],['t_log','📜','Log']];
+const TABS=[['t_cmd','💬','Comandos'],['t_prod','🛍','Produtos e Serviços'],['t_pay','💳','Pagamento'],['t_test','🧪','Testar pagamento'],['t_auto','⚡','Respostas auto'],['t_filter','🚫','Filtros'],['t_perm','🔒','Permissões'],['t_log','📜','Log']];
 const ACTION_META={
  '':{label:'Responder com texto',desc:'Envia uma mensagem de texto quando o usuário digitar o comando.'},
  'catalog':{label:'Abrir catálogo',desc:'Mostra automaticamente todos os produtos cadastrados na aba Produtos e Serviços.'},
@@ -159,13 +159,13 @@ const ACTION_META={
  'location':{label:'Pedir localização',desc:'Mostra um botão para o usuário compartilhar a localização dele com o bot.'},
  'payment':{label:'Finalizar compra',desc:'Envia o resumo do carrinho (itens + total) e o pagamento: no modo chave Pix manda a chave, o recebedor e o QR Code; no modo automático (API) gera um Pix com o valor exato e confirma sozinho.'}
 };
-const GATEWAY_META={
+const GATEWAY_META={ // a ordem aqui é a ordem da lista no painel
+ mercadopago:{label:'Mercado Pago (recomendado)',hasEnv:false,tokenLabel:'Access Token do Mercado Pago',
+  about:'⭐ Recomendado: libera Pix pela API direto na conta, sem pedir liberação ao suporte. O modo é definido pelo próprio token: TEST-... é teste, APP_USR-... é venda real.',
+  where:'Onde pegar: mercadopago.com.br/developers → Suas integrações → crie uma aplicação → Credenciais de produção (ou de teste) → Access Token. A conta precisa ter chave Pix cadastrada.'},
  pagbank:{label:'PagBank',hasEnv:true,tokenLabel:'Token da API do PagBank',
   about:'Para vender de verdade o PagBank precisa liberar a API de Pix em produção na sua conta (peça ao suporte).',
   where:'Onde pegar: acesso.pagbank.com.br → Venda online → Integrações → Gerar Token. A conta precisa ter chave Pix cadastrada.'},
- mercadopago:{label:'Mercado Pago',hasEnv:false,tokenLabel:'Access Token do Mercado Pago',
-  about:'Libera Pix pela API direto na conta. O modo é definido pelo próprio token: TEST-... é teste, APP_USR-... é venda real.',
-  where:'Onde pegar: mercadopago.com.br/developers → Suas integrações → crie uma aplicação → Credenciais de produção (ou de teste) → Access Token. A conta precisa ter chave Pix cadastrada.'},
  asaas:{label:'Asaas',hasEnv:true,tokenLabel:'Chave de API do Asaas',
   about:'Pix pela API com conta de pessoa física ou empresa. Tem ambiente Sandbox separado para testes (conta criada em sandbox.asaas.com).',
   where:'Onde pegar: no Asaas, Menu do usuário → Integrações → Chave de API → Gerar nova chave (começa com $aact_).'}
@@ -335,7 +335,7 @@ function payBlock(b){
    +'<label>Seu ID do Telegram (recebe cada pedido com o botão Confirmar pagamento)</label><input id="pay_admin" value="'+esc(b.payment.admin_chat_id||'')+'" placeholder="Ex: 123456789 — descubra com o @userinfobot">'
    +'<small class="tip">Mande /start para o seu próprio bot uma vez. Sem o seu ID, ninguém consegue confirmar os pagamentos.</small>';
  }else if(t==='api'){
-  const gw=GATEWAY_META[b.payment.gateway]?b.payment.gateway:'pagbank';
+  const gw=GATEWAY_META[b.payment.gateway]?b.payment.gateway:'mercadopago';
   const G=GATEWAY_META[gw];
   const env=b.payment.api_env||'sandbox';
   // a dica do token salvo só vale se o intermediador escolhido for o mesmo do token salvo
@@ -405,12 +405,16 @@ function renderEditor(){
  +'<div id="t_prod"><h2>Produtos e Serviços</h2><p class="mut">Crie uma categoria, adicione os produtos dela e salve. Para vender outro tipo de produto, clique em "+ Nova categoria" e repita. Cada categoria vira um catálogo separado que o cliente escolhe no bot.</p>'+prodCatalogHTML(b)
  +'<button class="ghost" onclick="newCategory()">+ Nova categoria</button>'+saveBtn+'</div>'
  +'<div id="t_pay">'+payBlock(b)+'</div>'
+ +'<div id="t_test">'+testBlock(b)+'</div>'
  +'<div id="t_auto"><h2>Respostas automáticas</h2>'+rows('auto_replies',[{k:'match',p:'palavra'},{t:'mode'},{k:'reply',t:'area',p:'resposta'}])
  +'<button class="ghost" onclick="add(\'auto_replies\',{match:\'\',mode:\'contains\',reply:\'\'})">+ Regra</button>'+saveBtn+'</div>'
  +'<div id="t_filter"><h2>Palavras banidas</h2><p class="mut">Clique numa palavra para remover.</p><div>'
  +b.banned_words.map((w,i)=>'<span class="tag" onclick="rmBan('+i+')">'+esc(w)+' ✕</span>').join('')
  +'</div><div class="row" style="margin-top:8px"><input id="banword" placeholder="palavra"><button class="ghost" onclick="addBan()">Adicionar</button></div>'+saveBtn+'</div>'
- +'<div id="t_perm"><h2>Permissões</h2><label><input type="checkbox" id="admin_only" '+(b.admin_only?'checked':'')+'> Somente admins do grupo / whitelist</label>'
+ +'<div id="t_perm"><h2>Permissões e chat</h2>'
+ +'<label style="display:flex;gap:8px;align-items:flex-start;color:var(--txt);font-size:13.5px"><input type="checkbox" id="auto_clean" style="margin-top:3px" '+(b.auto_clean!==false?'checked':'')+'>'
+ +'<span>🧹 <b>Chat limpo</b> — apaga automaticamente as mensagens já usadas depois de cada escolha do cliente (catálogo anterior, carrinho, perguntas respondidas e as respostas com nome, CPF e e-mail). O QR Code e o copia e cola somem quando o pagamento é confirmado.</span></label>'
+ +'<label><input type="checkbox" id="admin_only" '+(b.admin_only?'checked':'')+'> Somente admins do grupo / whitelist</label>'
  +'<label>Whitelist (IDs do Telegram separados por vírgula)</label><input id="whitelist" value="'+esc((b.whitelist||[]).join(', '))+'">'+saveBtn+'</div>'
  +'<div id="t_log"><h2>Log</h2><p class="mut">Tudo o que o bot recebe e faz, com os erros explicados.</p>'
  +'<div class="logbar">'+LOG_FILTERS.map(([f,l])=>'<button class="chip'+(logFilter===f?' on':'')+'" data-f="'+f+'" onclick="setLogFilter(\''+f+'\')">'+l+'<span class="n"></span></button>').join('')
@@ -432,6 +436,7 @@ function collect(){ // lê os campos da tela para o objeto local; devolve false 
  b.name=$('f_name').value;
  document.querySelectorAll('[data-l]').forEach(e=>{let v=e.value;if(e.dataset.f==='cmd')v=v.replace(/^\//,'').toLowerCase();b[e.dataset.l][e.dataset.i][e.dataset.f]=v});
  b.admin_only=$('admin_only').checked;
+ if($('auto_clean'))b.auto_clean=$('auto_clean').checked;
  b.whitelist=$('whitelist').value.split(',').map(s=>parseInt(s.trim(),10)).filter(x=>!isNaN(x));
  if($('pay_type')){
   b.payment=b.payment||{};
@@ -482,7 +487,7 @@ async function testToken(btn){
  let j;try{j=await api('POST','/api/bots/'+b.id+'/payment_test',{gateway:b.payment.gateway,token:$('pay_token').value.trim(),env:$('pay_env')?$('pay_env').value:''})}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
  btn.disabled=false;btn.textContent='Testar token';
  toast(j.ok?j.msg+' Agora clique em Salvar.':j.err,j.ok?'ok':'err')}
-document.addEventListener('input',e=>{if(e.target.closest('#editor')&&!e.target.closest('#t_log')&&e.target.type!=='file')setDirty(true)});
+document.addEventListener('input',e=>{if(e.target.closest('#editor')&&!e.target.closest('#t_log')&&!e.target.closest('#t_test')&&e.target.type!=='file')setDirty(true)});
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&cur()){e.preventDefault();save()}});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
 async function toggleEnable(){
@@ -491,6 +496,61 @@ async function toggleEnable(){
  if(!j.ok){b.enabled=!b.enabled;toast(j.err||'Erro','err');return}
  setDirty(false);toast(b.enabled?'Bot ativado ✓':'Bot pausado','ok');refresh()}
 async function delBot(){if(!confirm('Excluir este bot?'))return;await api('DELETE','/api/bots/'+sel);sel=null;refresh()}
+// ---------- Testar pagamento ----------
+let trialKey=null,trialTimer=null;
+function testBlock(b){
+ const p=b.payment||{},t=p.type||'';
+ const G=GATEWAY_META[p.gateway]||GATEWAY_META.mercadopago;
+ let conf,form='';
+ if(t==='api'){
+  conf='Atendimento automático · '+G.label+' · '+(p.api_env==='producao'?'Produção (dinheiro real)':'Modo de testes')+(p.api_token_hint?'':' · ⚠️ sem token salvo');
+  form='<div class="row"><div><label>Nome do pagador</label><input id="tr_nome" autocomplete="off" placeholder="Seu nome completo"></div>'
+   +'<div><label>CPF do pagador</label><input id="tr_cpf" autocomplete="off" inputmode="numeric" placeholder="Só números"></div></div>'
+   +'<label>E-mail do pagador</label><input id="tr_email" autocomplete="off" placeholder="Use um e-mail diferente do da sua conta">'
+   +'<small class="tip">O intermediador exige esses dados na cobrança. No Mercado Pago, o e-mail do pagador não pode ser o mesmo da conta que recebe.</small>';
+ }else if(t==='pixqr'){conf='Pix com valor exato · chave '+esc(p.pix_key||'(não salva)')}
+ else conf='Nenhum pagamento automático salvo. Escolha na aba Pagamento e clique em Salvar.';
+ return '<h2>Testar pagamento</h2><p class="mut">Gera uma cobrança de <b>R$ 1,00</b> com a configuração <b>salva</b>, direto aqui, sem passar pelo Telegram e sem avisar nenhum cliente. Em produção o valor é real e cai na sua conta.</p>'
+  +'<div class="statusbox"><span>⚙️</span><div><b>Configuração salva</b>'+conf+'</div></div>'
+  +(t==='api'?'<div class="actions" style="margin-top:0"><button class="ghost" onclick="trialToken(this)">1. Testar conexão</button></div>':'')
+  +form
+  +'<div class="actions">'
+  +(t==='api'||t==='pixqr'?'<button onclick="trialCreate(this)">'+(t==='api'?'2. ':'')+'Gerar Pix de teste (R$ 1,00)</button>':'')
+  +(t==='api'&&(p.pix_key||'').trim()?'<button class="ghost" onclick="trialCreate(this,true)">Testar chave reserva</button>':'')
+  +'</div><div id="trial_out"></div>'}
+async function trialToken(btn){
+ btn.disabled=true;btn.textContent='Testando...';
+ let j;try{j=await api('POST','/api/bots/'+sel+'/payment_test',{})}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
+ btn.disabled=false;btn.textContent='1. Testar conexão';
+ toast(j.ok?j.msg:j.err,j.ok?'ok':'err')}
+async function trialCreate(btn,fallback){
+ if(dirty){toast('Salve as alterações antes de testar: o teste usa a configuração salva.','warn');return}
+ const body={action:'create',fallback:!!fallback};
+ if($('tr_nome')&&!fallback){body.nome=$('tr_nome').value;body.cpf=$('tr_cpf').value;body.email=$('tr_email').value}
+ const label=btn.textContent;btn.disabled=true;btn.textContent='Gerando...';
+ let j;try{j=await api('POST','/api/bots/'+sel+'/payment_trial',body)}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
+ btn.disabled=false;btn.textContent=label;
+ if(!j.ok){toast(j.err,'err');return}
+ trialKey=j.key;toast('Pix de teste gerado ✓','ok');
+ $('trial_out').innerHTML='<div class="cmdblock" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">'
+  +(j.qr?'<img src="'+j.qr+'" alt="QR Code do Pix de teste" style="width:190px;height:190px;background:#fff;border-radius:8px;padding:6px;flex:0 0 auto">':'')
+  +'<div style="flex:1;min-width:220px"><b>Pix de teste gerado ✓</b><p class="mut" style="margin:4px 0 8px">Pague pelo app do seu banco para testar o ciclo completo.</p>'
+  +'<label>Pix copia e cola</label><textarea id="trial_copia" rows="4" readonly style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">'+esc(j.copia)+'</textarea>'
+  +(j.key_used?'<small class="tip">Chave usada no Pix: <b>'+esc(j.key_used)+'</b> — confira se é a sua.</small>':'')
+  +'<div class="actions"><button class="ghost" onclick="copyTrial()">Copiar código</button>'
+  +(j.manual?'':'<button class="ghost" onclick="trialStatus()">3. Verificar pagamento</button>')+'</div>'
+  +'<div id="trial_status" class="mut" style="margin-top:8px">'+(j.manual?'No Pix com valor exato a confirmação é pelo app do seu banco (o nome do recebedor deve ser o seu).':'')+'</div></div></div>';
+ clearInterval(trialTimer);
+ if(!j.manual){let n=0;trialTimer=setInterval(()=>{if(tab!=='t_test'||!trialKey||++n>60){clearInterval(trialTimer);return}trialStatus(true)},5000)}}
+async function trialStatus(silent){
+ if(!trialKey)return;
+ let j;try{j=await api('POST','/api/bots/'+sel+'/payment_trial',{action:'status',key:trialKey})}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
+ const s=$('trial_status');
+ if(!j.ok){if(s)s.textContent='⚠️ '+j.err;return}
+ if(j.paid){clearInterval(trialTimer);trialKey=null;if(s)s.innerHTML='<b style="color:var(--ok)">✅ Pagamento recebido! O ciclo completo está funcionando.</b>';toast('Pagamento de teste recebido ✓','ok')}
+ else if(s)s.textContent='⏳ Ainda não pago — verificando sozinho a cada 5 segundos...'}
+function copyTrial(){navigator.clipboard.writeText($('trial_copia').value).then(()=>toast('Código copiado ✓','ok'),()=>toast('Selecione o código e use Ctrl+C','err'))}
+
 // ---------- Log ----------
 const LOG_KIND={ERR:['erro','Erro'],WARN:['aviso','Aviso'],SYS:['sys','Sistema'],PAGO:['venda','💰 Pago'],PIX:['venda','Pix gerado'],
  COMPRA:['venda','Compra'],CARRINHO:['venda','Carrinho'],CMD:['msg','Comando'],CATALOGO:['msg','Catálogo'],AUTO:['msg','Resposta auto'],

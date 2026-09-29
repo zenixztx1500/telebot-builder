@@ -24,7 +24,7 @@ IMG_DIR.mkdir(parents=True, exist_ok=True)
 LOCK = threading.RLock()
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-EDITABLE = ("name", "commands", "auto_replies", "inline_keyboards", "reply_keyboard",
+EDITABLE = ("name", "commands", "auto_replies", "inline_keyboards", "reply_keyboard", "auto_clean",
             "banned_words", "admin_only", "whitelist", "enabled", "products", "payment")
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 IMG_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
@@ -249,8 +249,12 @@ GATEWAYS = {
 UA = "TeleBotBuilder/1.0"
 
 def gw_name(pay):
-    g = (pay or {}).get("gateway")
-    return g if g in GATEWAYS else "pagbank"
+    """Intermediador escolhido. Configuração antiga (pagbank_token) = PagBank; nova sem escolha = Mercado Pago (recomendado)."""
+    pay = pay or {}
+    g = pay.get("gateway")
+    if g in GATEWAYS:
+        return g
+    return "pagbank" if pay.get("pagbank_token") else "mercadopago"
 
 def gw_token(pay):
     pay = pay or {}
@@ -448,6 +452,39 @@ def build_app(bot):
             return m.status in ("administrator", "creator")
         return False
 
+    # ---- chat limpo: mensagens de navegação são apagadas na próxima escolha do cliente ----
+    auto_clean = bot.get("auto_clean", True)
+    trash = {}        # chat_id -> ids de mensagens já usadas (catálogo, carrinho, perguntas respondidas)
+    last_notice = {}  # chat_id -> id do último "adicionado ao carrinho" (só o mais recente fica na tela)
+    pix_msgs = {}     # chave do pedido -> ids do QR Code e do copia e cola (apagados quando o pagamento é confirmado)
+
+    def track(m):
+        if auto_clean and m is not None and getattr(m, "message_id", None):
+            trash.setdefault(m.chat_id, []).append(m.message_id)
+        return m
+
+    def remember_pix(key, *msgs):
+        if auto_clean:
+            pix_msgs[key] = [m.message_id for m in msgs if m is not None and getattr(m, "message_id", None)]
+
+    async def drop(bot_api, chat_id, ids):
+        for mid in ids:
+            try:
+                await bot_api.delete_message(chat_id, mid)
+            except Exception:
+                pass  # mensagem já apagada, antiga demais (48h) ou sem permissão no grupo
+
+    async def clean(bot_api, chat_id, also=None):
+        """Apaga as mensagens de navegação anteriores e, se passada, a mensagem do cliente que disparou a escolha."""
+        if not auto_clean:
+            return
+        ids = trash.pop(chat_id, [])
+        if chat_id in last_notice:
+            ids.append(last_notice.pop(chat_id))
+        if also is not None and getattr(also, "message_id", None):
+            ids.append(also.message_id)
+        await drop(bot_api, chat_id, ids)
+
     products = bot.get("products", [])
     carts = {}  # user_id -> lista de produtos; fica só na memória (zera ao reiniciar o bot)
     menu_row = []
@@ -542,7 +579,7 @@ def build_app(bot):
                 log(bid, "WARN", f"{label} falhou: usando Pix com valor exato (chave reserva)")
                 await pixqr_send(message, user, lines)
             else:
-                await message.reply_text("⚠️ Não consegui gerar o Pix agora. O vendedor já foi avisado — tente de novo em alguns minutos.")
+                track(await message.reply_text("⚠️ Não consegui gerar o Pix agora. O vendedor já foi avisado — tente de novo em alguns minutos."))
             return
         try:
             save_order(order_id, bid, message.chat_id, summary, total)
@@ -550,6 +587,7 @@ def build_app(bot):
             log(bid, "ERR", f"salvar pedido {order_id}: {e}")
         log(bid, "PIX", f"{user.id} pedido {order_id} {fmt_price(total / 100)}")
         await message.reply_text(f"💳 Pedido criado! Total: {fmt_price(total / 100)}")
+        foto_msg = None
         if qr:
             try:
                 if isinstance(qr, bytes):  # Mercado Pago e Asaas já devolvem a imagem
@@ -558,61 +596,63 @@ def build_app(bot):
                     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
                         r = await client.get(qr)
                     foto = io.BytesIO(r.content) if r.status_code == 200 and r.content else qr
-                await message.reply_photo(photo=foto, caption="📷 Escaneie o QR Code no app do seu banco.")
+                foto_msg = await message.reply_photo(photo=foto, caption="📷 Escaneie o QR Code no app do seu banco.")
             except Exception as e:
                 log(bid, "WARN", f"imagem do QR: {e}")
-        await message.reply_text(
+        copia_msg = await message.reply_text(
             f"Pix copia e cola (toque para copiar):\n\n`{copia}`\n\n"
             "Assim que o pagamento cair, você recebe a confirmação aqui automaticamente.",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Já paguei, verificar",
                                                                      callback_data=f"pixchk|{order_id}")]]))
+        remember_pix(order_id, foto_msg, copia_msg)
 
     async def api_checkout(message, user, items):
         if not gw_token(payment):
-            await message.reply_text("Pagamento automático não configurado — fale com o vendedor.")
+            track(await message.reply_text("Pagamento automático não configurado — fale com o vendedor."))
             return
         lines = cart_lines(items)
         if not lines:
-            await message.reply_text("Esses produtos estão sem preço. Fale com o vendedor.")
+            track(await message.reply_text("Esses produtos estão sem preço. Fale com o vendedor."))
             return
         if user.id in customers:
             await create_and_send_pix(message, user, lines, customers[user.id])
             return
         pay_state[user.id] = {"step": "nome", "lines": lines, "data": {}}
-        await message.reply_text("Para gerar o Pix preciso de alguns dados (só na primeira compra). "
-                                 "Envie *cancelar* para desistir.\n\n1/3 — Qual é o seu *nome completo*?",
-                                 parse_mode="Markdown")
+        track(await message.reply_text("Para gerar o Pix preciso de alguns dados (só na primeira compra). "
+                                       "Envie *cancelar* para desistir.\n\n1/3 — Qual é o seu *nome completo*?",
+                                       parse_mode="Markdown"))
 
     async def on_pay_step(msg, u, txt):
+        """Cada resposta do cliente (nome, CPF, e-mail) já foi apagada por quem chama; as perguntas são rastreadas."""
         st = pay_state[u.id]
         d = st["data"]
         if txt.lower() == "cancelar":
             pay_state.pop(u.id, None)
-            await msg.reply_text("Compra cancelada.")
+            track(await msg.reply_text("Compra cancelada."))
         elif st["step"] == "nome":
             if len(txt.split()) < 2:
-                await msg.reply_text("Envie seu nome completo (nome e sobrenome).")
+                track(await msg.reply_text("Envie seu nome completo (nome e sobrenome)."))
                 return
             d["nome"] = txt[:100]
             st["step"] = "cpf"
-            await msg.reply_text("2/3 — Agora envie seu CPF (só os números).")
+            track(await msg.reply_text("2/3 — Agora envie seu CPF (só os números)."))
         elif st["step"] == "cpf":
             cpf = re.sub(r"\D", "", txt)
             if not cpf_ok(cpf):
-                await msg.reply_text("CPF inválido. Confira e envie de novo (11 números).")
+                track(await msg.reply_text("CPF inválido. Confira e envie de novo (11 números)."))
                 return
             d["cpf"] = cpf
             st["step"] = "email"
-            await msg.reply_text("3/3 — Por último, seu e-mail.")
+            track(await msg.reply_text("3/3 — Por último, seu e-mail."))
         elif st["step"] == "email":
             if not email_ok(txt):
-                await msg.reply_text("E-mail inválido. Envie no formato nome@exemplo.com")
+                track(await msg.reply_text("E-mail inválido. Envie no formato nome@exemplo.com"))
                 return
             d["email"] = txt
             customers[u.id] = d
             pay_state.pop(u.id, None)
-            await msg.reply_text("✅ Dados recebidos! Gerando seu Pix...")
+            track(await msg.reply_text("✅ Dados recebidos! Gerando seu Pix..."))
             await create_and_send_pix(msg, u, st["lines"], d)
 
     async def notify_paid(bot_api, order_id):
@@ -620,6 +660,8 @@ def build_app(bot):
         if not row:
             return
         chat_id, summary = row
+        await drop(bot_api, chat_id, pix_msgs.pop(order_id, []))  # QR e copia e cola não servem mais
+        await clean(bot_api, chat_id)
         await bot_api.send_message(chat_id, "✅ Pagamento confirmado! Obrigado pela compra.")
         admin = str(payment.get("admin_chat_id") or "").strip()
         if admin.lstrip("-").isdigit():
@@ -683,14 +725,15 @@ def build_app(bot):
         except Exception as e:
             log(bid, "ERR", f"salvar pedido {key}: {e}")
         log(bid, "PIX", f"{user.id} pedido {txid} {fmt_price(total / 100)} (valor exato)")
-        await message.reply_photo(photo=io.BytesIO(qr_png(code)),
-                                  caption=f"📷 Escaneie no app do seu banco — o valor de {fmt_price(total / 100)} já vem preenchido.")
+        foto_msg = await message.reply_photo(photo=io.BytesIO(qr_png(code)),
+                                             caption=f"📷 Escaneie no app do seu banco — o valor de {fmt_price(total / 100)} já vem preenchido.")
         instr = (payment.get("instructions") or "").strip()
-        await message.reply_text(
+        copia_msg = await message.reply_text(
             f"Pix copia e cola (toque para copiar):\n\n`{code}`\n\n"
             + (instr + "\n\n" if instr else "") + "Depois de pagar, toque no botão abaixo.",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Já paguei", callback_data=f"manpaid|{key}")]]))
+        remember_pix(key, foto_msg, copia_msg)
         if admin_id:
             try:
                 await message.get_bot().send_message(admin_id, f"🆕 Pedido {txid} aguardando Pix\n\n{summary}",
@@ -725,7 +768,7 @@ def build_app(bot):
         uid = user.id
         items = carts.get(uid) or []
         if not items:
-            await message.reply_text("Seu carrinho está vazio. Adicione produtos no Catálogo antes de finalizar a compra.")
+            track(await message.reply_text("Seu carrinho está vazio. Adicione produtos no Catálogo antes de finalizar a compra."))
             return
         total = sum(parse_price(p.get("price")) for p in items)
         resumo = "\n".join(f"- {p.get('name')} ({p.get('price') or ''})" for p in items)
@@ -739,6 +782,7 @@ def build_app(bot):
             if not await allowed(update):
                 await update.message.reply_text("Somente administradores.")
                 return
+            await clean(ctx.bot, update.effective_chat.id, update.message)
             await do_checkout(update.message, update.effective_user)
             log(bid, "CMD", f"/{name} (finalizar compra) de {update.effective_user.id}")
         return h
@@ -760,16 +804,17 @@ def build_app(bot):
             ]])
             pimg = get_image(p.get("image"))
             if pimg:
-                await message.reply_photo(photo=io.BytesIO(pimg[1]), caption=caption, parse_mode="Markdown", reply_markup=kb)
+                track(await message.reply_photo(photo=io.BytesIO(pimg[1]), caption=caption, parse_mode="Markdown", reply_markup=kb))
             else:
-                await message.reply_text(caption, parse_mode="Markdown", reply_markup=kb)
+                track(await message.reply_text(caption, parse_mode="Markdown", reply_markup=kb))
 
     async def on_catalog(update, ctx):
         if not await allowed(update):
             await update.message.reply_text("Somente administradores.")
             return
+        await clean(ctx.bot, update.effective_chat.id, update.message)  # some o catálogo anterior e o "/catalogo" do cliente
         if not products:
-            await update.message.reply_text("Nenhum produto no catálogo ainda.")
+            track(await update.message.reply_text("Nenhum produto no catálogo ainda."))
             return
         cats = get_categories()
         if len(cats) <= 1:
@@ -778,7 +823,7 @@ def build_app(bot):
         else:
             kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{c} ({len(idxs)})", callback_data=f"catsel|{c}")]
                                         for c, idxs in cats.items()])
-            await update.message.reply_text("📂 *Escolha uma categoria:*", parse_mode="Markdown", reply_markup=kb)
+            track(await update.message.reply_text("📂 *Escolha uma categoria:*", parse_mode="Markdown", reply_markup=kb))
         log(bid, "CATALOGO", f"{update.effective_user.id}: {len(products)} produtos")
 
     async def on_cart(update, ctx):
@@ -786,9 +831,10 @@ def build_app(bot):
             await update.message.reply_text("Somente administradores.")
             return
         u = update.effective_user
+        await clean(ctx.bot, update.effective_chat.id, update.message)
         items = carts.get(u.id) or []
         if not items:
-            await update.message.reply_text("Seu carrinho está vazio. Use /catalogo para adicionar produtos.")
+            track(await update.message.reply_text("Seu carrinho está vazio. Use /catalogo para adicionar produtos."))
             return
         resumo = "\n".join(f"- {p.get('name')} ({p.get('price') or ''})" for p in items)
         total = sum(parse_price(p.get("price")) for p in items)
@@ -798,7 +844,7 @@ def build_app(bot):
             InlineKeyboardButton("✅ Finalizar compra", callback_data="checkout"),
             InlineKeyboardButton("🗑 Esvaziar", callback_data="clearcart")
         ]])
-        await update.message.reply_text(f"🛒 *Seu carrinho:*\n{resumo}", parse_mode="Markdown", reply_markup=kb)
+        track(await update.message.reply_text(f"🛒 *Seu carrinho:*\n{resumo}", parse_mode="Markdown", reply_markup=kb))
 
     async def on_contact(update, ctx):
         c = update.message.contact
@@ -825,9 +871,12 @@ def build_app(bot):
             await on_cart(update, ctx)
             return
         if txt == "✅ Finalizar compra":
+            await clean(ctx.bot, msg.chat_id, msg)
             await do_checkout(msg, u)
             return
         if u.id in pay_state:
+            # apaga a resposta do cliente (nome, CPF, e-mail) e a pergunta anterior: dado pessoal não fica no chat
+            await clean(ctx.bot, msg.chat_id, msg)
             await on_pay_step(msg, u, txt)
             return
         low = txt.lower()
@@ -858,6 +907,7 @@ def build_app(bot):
             cat = data.split("|", 1)[1]
             idxs = get_categories().get(cat, [])
             await q.answer()
+            await clean(ctx.bot, q.message.chat_id)  # some a lista de categorias e o que estava aberto antes
             await send_category(q.message, cat, idxs)
             return
         if data.startswith("addcart|"):
@@ -871,7 +921,12 @@ def build_app(bot):
                 if len(items) > 1:
                     txt += f"\n\n🟢 *Total do carrinho: {fmt_price(total)}*"
                 await q.answer("Adicionado ao carrinho!")
-                await q.message.reply_text(txt, parse_mode="Markdown")
+                chat = q.message.chat_id
+                if auto_clean and chat in last_notice:  # só o aviso mais recente fica; o catálogo continua aberto
+                    await drop(ctx.bot, chat, [last_notice.pop(chat)])
+                aviso = await q.message.reply_text(txt, parse_mode="Markdown")
+                if auto_clean and aviso is not None and getattr(aviso, "message_id", None):
+                    last_notice[chat] = aviso.message_id
                 log(bid, "CARRINHO", f"{u.id} adicionou {p.get('name')}")
             else:
                 await q.answer("Produto não encontrado.")
@@ -881,11 +936,13 @@ def build_app(bot):
             await q.answer()
             if 0 <= idx < len(products):
                 p = products[idx]
+                await clean(ctx.bot, q.message.chat_id)
                 await send_payment(q.message, f"- *{p.get('name')}* — *{p.get('price') or ''}*", items=[p], user=u)
                 log(bid, "COMPRA", f"{u.id} comprou direto {p.get('name')}")
             return
         if data == "checkout":
             await q.answer()
+            await clean(ctx.bot, q.message.chat_id)
             await do_checkout(q.message, u)
             log(bid, "COMPRA", f"{u.id} finalizou carrinho")
             return
@@ -918,6 +975,8 @@ def build_app(bot):
             await q.answer("Pagamento confirmado!" if row else "Esse pedido já estava confirmado.")
             if row:
                 chat_id, _ = row
+                await drop(ctx.bot, chat_id, pix_msgs.pop(key, []))  # QR e copia e cola não servem mais
+                await clean(ctx.bot, chat_id)
                 await ctx.bot.send_message(chat_id, "✅ Pagamento confirmado pelo vendedor! Obrigado pela compra.")
                 log(bid, "PAGO", f"{key.split(':', 1)[1]} confirmado pelo vendedor")
             try:
@@ -929,26 +988,28 @@ def build_app(bot):
         if data.startswith("pixchk|"):
             order_id = data.split("|", 1)[1]
             await q.answer()
+            await clean(ctx.bot, q.message.chat_id)  # some o "ainda não identificado" anterior
             status = order_paid(order_id, bid)
             if status is None:
-                await q.message.reply_text("Pedido não encontrado.")
+                track(await q.message.reply_text("Pedido não encontrado."))
             elif status:
-                await q.message.reply_text("✅ Esse pagamento já foi confirmado.")
+                track(await q.message.reply_text("✅ Esse pagamento já foi confirmado."))
             else:
                 try:
                     pago = await gateway_is_paid(payment, order_id)
                 except Exception as e:
                     log(bid, "ERR", f"verificar {order_id}: {e}")
-                    await q.message.reply_text("⚠️ Não consegui verificar agora. Tente de novo.")
+                    track(await q.message.reply_text("⚠️ Não consegui verificar agora. Tente de novo."))
                     return
                 if pago:
                     await notify_paid(ctx.bot, order_id)
                 else:
-                    await q.message.reply_text("⏳ Pagamento ainda não identificado. Aguarde alguns segundos e toque em verificar de novo.")
+                    track(await q.message.reply_text("⏳ Pagamento ainda não identificado. Aguarde alguns segundos e toque em verificar de novo."))
             return
         if data == "clearcart":
             carts[u.id] = []
             await q.answer("Carrinho esvaziado.")
+            await clean(ctx.bot, q.message.chat_id)  # apaga a mensagem do carrinho
             return
         await q.answer()
         log(bid, "CALLBACK", data)
@@ -1175,7 +1236,7 @@ def api_update(bid):
             newp = {k: v for k, v in (body.get("payment") or {}).items()
                     if k not in ("api_token_hint", "api_token_gateway", "pagbank_token_hint", "pagbank_token", "pagbank_env")}
             oldp = b.get("payment") or {}
-            gw = newp.get("gateway") if newp.get("gateway") in GATEWAYS else "pagbank"
+            gw = gw_name(newp)
             old_gw = gw_name(oldp)
             typed = (newp.get("api_token") or "").strip()
             tok = typed or (gw_token(oldp) if gw == old_gw else "")
@@ -1217,14 +1278,63 @@ def api_payment_test(bid):
     b = next((x for x in load_bots(session["uid"]) if x["id"] == bid), None)
     if not b:
         return jsonify(ok=False, err="Bot não encontrado"), 404
-    gw = d.get("gateway") if d.get("gateway") in GATEWAYS else "pagbank"
-    env = "producao" if d.get("env") == "producao" else "sandbox"
     oldp = b.get("payment") or {}
+    gw = d.get("gateway") if d.get("gateway") in GATEWAYS else gw_name(oldp)
+    env = "producao" if (d.get("env") or gw_env(oldp)) == "producao" else "sandbox"
     tok = (d.get("token") or "").strip() or (gw_token(oldp) if gw == gw_name(oldp) else "")
     if not tok:
         return jsonify(ok=False, err=f"Cole o token do {GATEWAYS[gw]['label']} primeiro.")
     res, msg = gateway_diagnose(gw, tok, env)
     return jsonify(ok=bool(res), msg=msg, err=None if res else msg)
+
+@app.route("/api/bots/<bid>/payment_trial", methods=["POST"])
+@login_required
+def api_payment_trial(bid):
+    """Aba 'Testar pagamento': gera um Pix de R$ 1,00 com a configuração SALVA e consulta se foi pago.
+    Não cria pedido no bot (nada é enviado para clientes)."""
+    d = request.get_json(force=True) or {}
+    b = next((x for x in load_bots(session["uid"]) if x["id"] == bid), None)
+    if not b:
+        return jsonify(ok=False, err="Bot não encontrado"), 404
+    pay = b.get("payment") or {}
+    ptype = pay.get("type") or ""
+    if d.get("action") == "status":
+        key = d.get("key") or ""
+        if ptype != "api" or key.startswith("manual:"):
+            return jsonify(ok=False, err="No Pix com valor exato a confirmação é pelo app do seu banco.")
+        try:
+            return jsonify(ok=True, paid=asyncio.run(gateway_is_paid(pay, key)))
+        except Exception as e:
+            return jsonify(ok=False, err=f"Não consegui consultar: {str(e)[:300]}")
+    lines = [("Teste do painel", 1, 100)]
+    ref = f"teste-{bid}-{uuid.uuid4().hex[:8]}"
+    if ptype == "pixqr" or (ptype == "api" and d.get("fallback")):
+        if not (pay.get("pix_key") or "").strip():
+            return jsonify(ok=False, err="Salve a sua chave Pix primeiro.")
+        txid = "TESTE" + uuid.uuid4().hex[:8].upper()
+        code = pix_brcode(pay["pix_key"], pay.get("pix_name") or "", pay.get("pix_city") or "", 100, txid)
+        return jsonify(ok=True, key=f"manual:{txid}", copia=code, manual=True,
+                       key_used=pix_key_normalize(pay["pix_key"]),
+                       qr="data:image/png;base64," + base64.b64encode(qr_png(code)).decode())
+    if ptype != "api":
+        return jsonify(ok=False, err='Escolha e salve o Tipo "Atendimento automático" ou "Pix com valor exato" na aba Pagamento.')
+    if not gw_token(pay):
+        return jsonify(ok=False, err="Salve o token do intermediador na aba Pagamento primeiro.")
+    nome, cpf, email = (d.get("nome") or "").strip(), re.sub(r"\D", "", d.get("cpf") or ""), (d.get("email") or "").strip()
+    if len(nome.split()) < 2 or not cpf_ok(cpf) or not email_ok(email):
+        return jsonify(ok=False, err="Preencha nome completo, CPF válido e e-mail do pagador de teste.")
+    try:
+        key, copia, qr = asyncio.run(gateway_create_pix(pay, ref, {"nome": nome, "cpf": cpf, "email": email}, lines))
+    except Exception as e:
+        return jsonify(ok=False, err=f"O {GATEWAYS[gw_name(pay)]['label']} recusou: {str(e)[:400]}")
+    if isinstance(qr, str) and qr:
+        try:
+            r = httpx.get(qr, timeout=20, follow_redirects=True)
+            qr = r.content if r.status_code == 200 else None
+        except Exception:
+            qr = None
+    return jsonify(ok=True, key=key, copia=copia, manual=False,
+                   qr=("data:image/png;base64," + base64.b64encode(qr).decode()) if qr else "")
 
 @app.route("/api/bots/<bid>", methods=["DELETE"])
 @login_required
