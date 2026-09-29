@@ -359,7 +359,12 @@ function payBlock(b){
    +'<button class="ghost" type="button" onclick="testToken(this)">Testar token</button></div>'
    +'<small class="tip">'+G.where+' O token nunca volta para o navegador.</small>'
    +'<label>Seu ID do Telegram (recebe o aviso de cada venda paga)</label><input id="pay_admin" value="'+esc(b.payment.admin_chat_id||'')+'" placeholder="Ex: 123456789 — descubra com o @userinfobot">'
-   +'<small class="tip">Mande /start para o seu próprio bot uma vez; sem isso o Telegram não deixa ele te enviar o aviso.</small>';
+   +'<small class="tip">Mande /start para o seu próprio bot uma vez; sem isso o Telegram não deixa ele te enviar o aviso.</small>'
+   +'<div class="cmdblock" style="margin-top:14px"><h2>Chave Pix reserva (opcional, recomendado)</h2>'
+   +'<p class="mut" style="margin:0 0 6px">Se o '+G.label+' recusar a cobrança (token inválido, conta sem liberação, instabilidade), o bot envia um Pix com valor exato para esta chave em vez de perder a venda. Esses pedidos você confirma com o botão no Telegram.</p>'
+   +'<label>Sua chave Pix</label><input id="pay_pixkey" value="'+esc(b.payment.pix_key||'')+'" placeholder="CPF, CNPJ, e-mail, telefone (+55 11 9...) ou chave aleatória">'
+   +'<div class="row"><div><label>Nome do recebedor</label><input id="pay_pixname" maxlength="25" value="'+esc(b.payment.pix_name||'')+'" placeholder="Como aparece no Pix"></div>'
+   +'<div><label>Cidade</label><input id="pay_pixcity" maxlength="15" value="'+esc(b.payment.pix_city||'')+'" placeholder="Ex: São Paulo"></div></div></div>';
  }
  return '<h2>Pagamento</h2><p class="mut">Escolha como o bot cobra. O cliente finaliza pelo botão 🛒 Carrinho → ✅ Finalizar compra (ou por um comando com a ação "Finalizar compra").</p>'
   +'<label>Tipo</label><select id="pay_type" onchange="collect();renderEditor()">'

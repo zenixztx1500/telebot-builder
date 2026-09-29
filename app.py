@@ -531,7 +531,16 @@ def build_app(bot):
                 payment, f"{bid}-{user.id}-{uuid.uuid4().hex[:8]}", customer, lines)
         except Exception as e:
             log(bid, "ERR", f"Pix: {e}")
-            await message.reply_text("⚠️ Não consegui gerar o Pix agora. Tente de novo em instantes.")
+            label = GATEWAYS[gw_name(payment)]["label"]
+            reserva = bool((payment.get("pix_key") or "").strip())
+            await alert_seller(message.get_bot(), f"⚠️ O {label} recusou a cobrança de um cliente"
+                               + (" — enviei o Pix com valor exato (chave reserva) no lugar." if reserva else " — a venda não foi gerada.")
+                               + f"\n\nMotivo: {str(e)[:300]}\n\nConfira o token na aba Pagamento do painel (botão Testar token).")
+            if reserva:
+                log(bid, "WARN", f"{label} falhou: usando Pix com valor exato (chave reserva)")
+                await pixqr_send(message, user, lines)
+            else:
+                await message.reply_text("⚠️ Não consegui gerar o Pix agora. O vendedor já foi avisado — tente de novo em alguns minutos.")
             return
         try:
             save_order(order_id, bid, message.chat_id, summary, total)
@@ -638,10 +647,24 @@ def build_app(bot):
     def confirm_kb(key):
         return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Confirmar pagamento", callback_data=f"manconf|{key}")]])
 
+    last_alert = {"t": 0.0}
+
+    async def alert_seller(bot_api, text):
+        """Avisa o vendedor no Telegram (no máximo 1 aviso a cada 10 min, para não virar spam)."""
+        if not admin_id or time.time() - last_alert["t"] < 600:
+            return
+        last_alert["t"] = time.time()
+        try:
+            await bot_api.send_message(admin_id, text)
+        except Exception as e:
+            log(bid, "WARN", f"aviso ao vendedor: {e}")
+
     async def pixqr_checkout(message, user, items):
+        await pixqr_send(message, user, cart_lines(items))
+
+    async def pixqr_send(message, user, lines):
         """Pix com valor exato: gera o BR Code aqui mesmo, sem pedir dados do cliente. Confirmação é do vendedor."""
         key_pix = (payment.get("pix_key") or "").strip()
-        lines = cart_lines(items)
         if not key_pix or not lines:
             await message.reply_text("Pagamento não configurado — fale com o vendedor.")
             return
