@@ -58,6 +58,27 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:
 .tabnav button:hover{background:var(--card2);color:var(--txt)}
 .tabnav button.on{background:var(--card2);color:var(--txt);border-left-color:var(--acc)}
 .tabpanel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px;min-width:0}
+/* produtos */
+.prodrow{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:start;padding:12px 0;border-top:1px solid var(--line)}
+.cmdblock>.row+.prodrow{border-top:0;padding-top:4px}
+.thumb{width:64px;height:64px;margin:0;border-radius:9px;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;color:var(--mut);font-size:11px;text-align:center;line-height:1.3}
+.thumb:hover{border-color:var(--acc);color:var(--acc)}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.pfields{display:flex;flex-direction:column;gap:8px;min-width:0}
+.pfields .row{margin:0}
+.pfields .price{flex:0 0 140px}
+.invalid{border-color:var(--bad)!important;box-shadow:0 0 0 1px var(--bad)}
+/* token e status */
+.secret{-webkit-text-security:disc;font-family:ui-monospace,Menlo,Consolas,monospace}
+.statusbox{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin:12px 0;background:var(--card2);font-size:13px}
+.statusbox.ok{border-color:rgba(47,191,159,.45)}.statusbox.warn{border-color:rgba(224,168,75,.5)}
+.statusbox b{display:block;margin-bottom:2px}
+/* avisos (toast) */
+.toast{position:fixed;right:18px;bottom:18px;z-index:50;max-width:380px;background:var(--card2);color:var(--txt);border:1px solid var(--line);border-left-width:4px;border-radius:9px;padding:11px 15px;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.45);opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;pointer-events:none}
+.toast.show{opacity:1;transform:none}
+.toast.ok{border-left-color:var(--ok)}.toast.err{border-left-color:var(--bad)}.toast.warn{border-left-color:#E0A84B}
+button:disabled{opacity:.6;cursor:default}
+.dirty-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#E0A84B;margin-left:6px;vertical-align:middle}
 @media(max-width:900px){
  .shell{grid-template-columns:1fr}
  aside{border-right:0;border-bottom:1px solid var(--line)}
@@ -78,6 +99,11 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:
  .nameinput{font-size:17px;min-width:0;flex:1 1 100%}
  .botheader{gap:8px}
  .cmdblock img,.cmdblock div[style*="width:48px"],.cmdblock div[style*="width:40px"]{width:100%!important;height:120px!important}
+ .prodrow{grid-template-columns:56px 1fr auto}
+ .thumb{width:56px;height:56px}
+ .thumb img{width:100%!important;height:100%!important}
+ .pfields .price{flex:1 1 100%}
+ .toast{left:12px;right:12px;bottom:12px;max-width:none}
 }
 </style></head><body>
 <header>
@@ -95,6 +121,7 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:
  <div id="editor" class="hide"></div>
 </div>
 </div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -134,7 +161,7 @@ async function newBot(){
  const t=prompt('Token do BotFather:');if(!t)return;
  const n=prompt('Nome do bot:','MeuBot')||'MeuBot';
  const j=await api('POST','/api/bots/new',{token:t,name:n});
- if(j.ok){sel=j.id;tab='t_cmd';refresh()}else alert(j.err)}
+ if(j.ok){sel=j.id;tab='t_cmd';toast('Bot criado ✓','ok');refresh()}else toast(j.err,'err')}
 
 function rows(list,fields,ph){ // linhas editáveis genéricas (usado por auto_replies)
  return cur()[list].map((r,i)=>{
@@ -148,7 +175,7 @@ function rows(list,fields,ph){ // linhas editáveis genéricas (usado por auto_r
   const tip=hasMode?'<small class="tip">'+MODE_META[r.mode==='exact'?'exact':'contains'].desc+'</small>':'';
   return line+tip;
  }).join('')}
-const saveBtn='<div class="actions"><button onclick="save()">Salvar</button></div>';
+const saveBtn='<div class="actions"><button class="savebtn" onclick="save()">Salvar</button><span class="mut" style="align-self:center">ou Ctrl+S</span></div>';
 
 function cmdRows(b){
  if(!b.commands.length)return '<p class="mut">Nenhum comando ainda.</p>';
@@ -186,10 +213,10 @@ async function uploadCmdImage(input,i){
   const fd=new FormData();fd.append('image',input.files[0]);
   const r=await fetch('/api/upload_image',{method:'POST',body:fd});
   const j=await r.json();
-  if(!j.ok){alert('Erro ao enviar imagem: '+j.err);return}
+  if(!j.ok){toast('Erro ao enviar imagem: '+j.err,'err');return}
   cur().commands[i].image=j.filename;
-  renderEditor()
- }catch(e){alert('Falha ao enviar imagem (erro '+(e&&e.message||e)+')')}}
+  setDirty(true);toast('Foto enviada. Clique em Salvar para aplicar.','ok');renderEditor()
+ }catch(e){toast('Falha ao enviar imagem (erro '+(e&&e.message||e)+')','err')}}
 
 function catGroups(b){
  const groups=new Map();
@@ -200,17 +227,22 @@ function catGroups(b){
  });
  return groups;
 }
+function parsePrice(s){ // mesma regra do servidor: 'R$ 1.234,56' -> 1234.56
+ s=String(s==null?'':s).replace(/[^\d,.\-]/g,'');if(!s)return 0;
+ if(s.includes(',')&&s.includes('.'))s=s.replace(/\./g,'').replace(',','.');else if(s.includes(','))s=s.replace(',','.');
+ const v=parseFloat(s);return isNaN(v)?0:v}
+const fmtPrice=v=>'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+function priceBlur(el){const v=parsePrice(el.value);if(v>0){el.value=fmtPrice(v);el.classList.remove('invalid')}}
 function prodRow(p,i){
- const thumb=p.image
-  ?'<img src="/images/'+esc(p.image)+'" style="width:48px;height:48px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex:0 0 auto">'
-  :'<div style="width:48px;height:48px;border-radius:8px;border:1px solid var(--line);flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:10px;text-align:center">sem foto</div>';
- return '<div class="row" style="align-items:center;flex-wrap:wrap">'
-  +thumb
-  +'<input type="file" accept="image/*" style="flex:1 1 140px" onchange="uploadProdImage(this,'+i+')">'
-  +'<input data-l="products" data-i="'+i+'" data-f="name" value="'+esc(p.name)+'" placeholder="nome do produto">'
-  +'<input data-l="products" data-i="'+i+'" data-f="price" value="'+esc(p.price)+'" placeholder="preço">'
-  +'<textarea rows="1" data-l="products" data-i="'+i+'" data-f="description" placeholder="descrição">'+esc(p.description)+'</textarea>'
-  +'<button class="ghost" title="Remover" onclick="rm(\'products\','+i+')">✕</button></div>'}
+ const thumb=p.image?'<img src="/images/'+esc(p.image)+'" alt="">':'📷<br>foto';
+ return '<div class="prodrow">'
+  +'<label class="thumb" title="Clique para escolher a foto">'+thumb
+  +'<input type="file" accept="image/*" hidden onchange="uploadProdImage(this,'+i+')"></label>'
+  +'<div class="pfields"><div class="row">'
+  +'<input data-l="products" data-i="'+i+'" data-f="name" value="'+esc(p.name)+'" placeholder="Nome do produto" maxlength="64">'
+  +'<input class="price" data-l="products" data-i="'+i+'" data-f="price" value="'+esc(p.price)+'" placeholder="R$ 0,00" inputmode="decimal" name="valor_item_'+i+'" onblur="priceBlur(this)">'
+  +'</div><textarea rows="2" data-l="products" data-i="'+i+'" data-f="description" placeholder="Descrição (aparece no bot)">'+esc(p.description)+'</textarea></div>'
+  +'<button class="ghost" title="Remover produto" onclick="rm(\'products\','+i+')">✕</button></div>'}
 function prodCatalogHTML(b){
  const groups=catGroups(b);
  if(!b.products.length)return '<p class="mut">Nenhuma categoria ainda. Clique em "+ Nova categoria" para começar.</p>';
@@ -225,8 +257,9 @@ function prodCatalogHTML(b){
  return html}
 function addProductToCat(cat){
  if(!collect())return;
- cur().products.push({name:'',price:'',description:'',image:'',category:cat});
- renderEditor()}
+ const i=cur().products.push({name:'',price:'',description:'',image:'',category:cat})-1;
+ setDirty(true);renderEditor();
+ const f=document.querySelector('[data-l="products"][data-i="'+i+'"][data-f="name"]');if(f)f.focus()}
 function newCategory(){
  const name=(prompt('Nome da nova categoria (ex: Cursos, Ferramentas digitais):')||'').trim();
  if(!name)return;
@@ -239,10 +272,10 @@ async function uploadProdImage(input,i){
   const fd=new FormData();fd.append('image',input.files[0]);
   const r=await fetch('/api/upload_image',{method:'POST',body:fd});
   const j=await r.json();
-  if(!j.ok){alert('Erro ao enviar imagem: '+j.err);return}
+  if(!j.ok){toast('Erro ao enviar imagem: '+j.err,'err');return}
   cur().products[i].image=j.filename;
-  renderEditor()
- }catch(e){alert('Falha ao enviar imagem (erro '+(e&&e.message||e)+')')}}
+  setDirty(true);toast('Foto enviada. Clique em Salvar para aplicar.','ok');renderEditor()
+ }catch(e){toast('Falha ao enviar imagem (erro '+(e&&e.message||e)+')','err')}}
 
 function payBlock(b){
  b.payment=b.payment||{type:'',pix_key:'',pix_name:'',instructions:'',qr_image:''};
@@ -257,15 +290,23 @@ function payBlock(b){
  }else if(t==='api'){
   const env=b.payment.pagbank_env||'sandbox';
   const hint=b.payment.pagbank_token_hint||'';
-  extra='<label>Ambiente do PagBank</label><select id="pay_env">'
+  const status=hint
+   ?'<div class="statusbox ok"><span>✅</span><div><b>Pix automático ativo</b>Token salvo (termina em '+esc(hint.replace('...',''))+') · Ambiente: '+(env==='producao'?'Produção (vendas reais)':'Sandbox (testes)')+'</div></div>'
+   :'<div class="statusbox warn"><span>⚠️</span><div><b>Falta o token do PagBank</b>Sem ele o bot não consegue gerar o QR Code. Cole o token abaixo, clique em Testar e depois em Salvar.</div></div>';
+  extra=status
+   +'<label>Ambiente do PagBank</label><select id="pay_env">'
    +'<option value="sandbox"'+(env!=='producao'?' selected':'')+'>Sandbox (testes, sem dinheiro real)</option>'
    +'<option value="producao"'+(env==='producao'?' selected':'')+'>Produção (vendas reais)</option></select>'
-   +'<label>Token da API do PagBank</label><input id="pay_token" type="password" autocomplete="off" value="'+esc(b.payment.pagbank_token||'')+'" placeholder="'+(hint?'Token salvo (termina em '+esc(hint)+'). Deixe em branco para manter.':'Cole aqui o token do PagBank')+'">'
-   +'<small class="tip">Onde pegar: acesso.pagbank.com.br → Venda online → Integrações → Gerar Token. O token é conferido no PagBank ao salvar e nunca volta para o navegador. Para vender de verdade, sua conta precisa ter uma chave Pix cadastrada.</small>'
+   +'<label>Token da API do PagBank</label><div class="row">'
+   // campo de texto mascarado (e não type=password) para o navegador não preencher a senha do painel aqui
+   +'<input id="pay_token" class="secret" type="text" name="pagbank_api_token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore value="'+esc(b.payment.pagbank_token||'')+'" placeholder="'+(hint?'Deixe em branco para manter o token salvo':'Cole aqui o token do PagBank')+'">'
+   +'<button class="ghost" type="button" onclick="toggleSecret(this)">Mostrar</button>'
+   +'<button class="ghost" type="button" onclick="testToken(this)">Testar token</button></div>'
+   +'<small class="tip">Onde pegar: acesso.pagbank.com.br → Venda online → Integrações → Gerar Token. O token nunca volta para o navegador. Para vender de verdade, sua conta PagBank precisa ter uma chave Pix cadastrada.</small>'
    +'<label>Seu ID do Telegram (recebe o aviso de cada venda paga)</label><input id="pay_admin" value="'+esc(b.payment.admin_chat_id||'')+'" placeholder="Ex: 123456789 — descubra com o @userinfobot">'
    +'<small class="tip">Mande /start para o seu próprio bot uma vez; sem isso o Telegram não deixa ele te enviar o aviso.</small>';
  }
- return '<h2>Pagamento</h2><p class="mut">Escolha como o bot trata pagamentos. Depois, crie um comando na aba Comandos com a ação "Finalizar compra" para o cliente acionar.</p>'
+ return '<h2>Pagamento</h2><p class="mut">Escolha como o bot cobra. O cliente finaliza pelo botão 🛒 Carrinho → ✅ Finalizar compra (ou por um comando com a ação "Finalizar compra").</p>'
   +'<label>Tipo</label><select id="pay_type" onchange="collect();renderEditor()">'
   +Object.entries(PAY_META).map(([v,m])=>'<option value="'+v+'"'+(t===v?' selected':'')+'>'+m.label+'</option>').join('')
   +'</select><small class="tip">'+PAY_META[t].desc+'</small>'
@@ -278,10 +319,10 @@ async function uploadQr(input){
   const fd=new FormData();fd.append('image',input.files[0]);
   const r=await fetch('/api/upload_image',{method:'POST',body:fd});
   const j=await r.json();
-  if(!j.ok){alert('Erro ao enviar imagem: '+j.err);return}
+  if(!j.ok){toast('Erro ao enviar imagem: '+j.err,'err');return}
   cur().payment.qr_image=j.filename;
-  renderEditor()
- }catch(e){alert('Falha ao enviar imagem (erro '+(e&&e.message||e)+')')}}
+  setDirty(true);toast('Foto enviada. Clique em Salvar para aplicar.','ok');renderEditor()
+ }catch(e){toast('Falha ao enviar imagem (erro '+(e&&e.message||e)+')','err')}}
 
 function renderEditor(){
  const b=cur();
@@ -313,6 +354,9 @@ function renderEditor(){
  +'<label>Whitelist (IDs do Telegram separados por vírgula)</label><input id="whitelist" value="'+esc((b.whitelist||[]).join(', '))+'">'+saveBtn+'</div>'
  +'<div id="t_log"><pre id="logbox">carregando...</pre><button class="ghost" onclick="loadLog()">Atualizar</button></div>'
  +'</div></div>';
+ // o painel não é formulário de login: impede o navegador de preencher e-mail/senha salvos nos campos
+ $('editor').querySelectorAll('input:not([type=file]):not([type=checkbox]),textarea').forEach(e=>e.setAttribute('autocomplete','off'));
+ setDirty(dirty);
  showTab()}
 function showTab(){TABS.forEach(([id])=>{const e=$(id);if(e)e.classList.toggle('hide',id!==tab)});if(tab==='t_log')loadLog()}
 function setTab(id){collect();tab=id;renderEditor()}
@@ -334,12 +378,50 @@ function collect(){ // lê os campos da tela para o objeto local; devolve false 
   if($('pay_admin'))b.payment.admin_chat_id=$('pay_admin').value.trim();
  }
  return true}
-function add(list,obj){if(!collect())return;cur()[list].push(obj);renderEditor()}
-function rm(list,i){if(!collect())return;cur()[list].splice(i,1);renderEditor()}
-function addBan(){if(!collect())return;const v=$('banword').value.trim().toLowerCase();if(!v)return;const b=cur();if(!b.banned_words.includes(v))b.banned_words.push(v);renderEditor()}
-function rmBan(i){if(!collect())return;cur().banned_words.splice(i,1);renderEditor()}
-async function save(){if(!collect())return;const b=cur();const j=await api('PUT','/api/bots/'+b.id,b);alert(j.ok?'Salvo':j.err);refresh()}
-async function toggleEnable(){if(!collect())return;const b=cur();b.enabled=!b.enabled;await api('PUT','/api/bots/'+b.id,b);refresh()}
+function add(list,obj){if(!collect())return;cur()[list].push(obj);setDirty(true);renderEditor()}
+function rm(list,i){if(!collect())return;cur()[list].splice(i,1);setDirty(true);renderEditor()}
+function addBan(){if(!collect())return;const v=$('banword').value.trim().toLowerCase();if(!v)return;const b=cur();if(!b.banned_words.includes(v))b.banned_words.push(v);setDirty(true);renderEditor()}
+function rmBan(i){if(!collect())return;cur().banned_words.splice(i,1);setDirty(true);renderEditor()}
+function toast(msg,kind){const t=$('toast');t.textContent=msg;t.className='toast show '+(kind||'');clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',kind==='ok'?2500:6000)}
+let dirty=false;
+function setDirty(v){dirty=v;document.querySelectorAll('.savebtn').forEach(x=>x.innerHTML=v?'Salvar alterações<span class="dirty-dot"></span>':'Salvar')}
+function validate(b){ // devolve mensagem de erro ou '' ; marca o campo com problema
+ for(let i=0;i<b.products.length;i++){
+  const p=b.products[i];
+  if(!(p.name||'').trim())return['Um produto está sem nome (categoria "'+((p.category||'').trim()||'Geral')+'").',i,'name'];
+  const v=parsePrice(p.price);
+  if(!(v>0))return['Preço inválido em "'+p.name+'". Use por exemplo 19,90.',i,'price'];
+  p.price=fmtPrice(v);
+ }
+ return null}
+async function save(){
+ if(!collect())return;const b=cur();
+ const bad=validate(b);
+ if(bad){
+  const [msg,i,f]=bad;tab='t_prod';renderEditor();
+  const el=document.querySelector('[data-l="products"][data-i="'+i+'"][data-f="'+f+'"]');
+  if(el){el.classList.add('invalid');el.focus()}
+  toast(msg,'err');return}
+ const btns=[...document.querySelectorAll('.savebtn')];btns.forEach(x=>{x.disabled=true;x.textContent='Salvando...'});
+ let j;
+ try{j=await api('PUT','/api/bots/'+b.id,b)}catch(e){j={ok:false,err:'Sem conexão com o servidor. Suas alterações continuam na tela; tente salvar de novo.'}}
+ btns.forEach(x=>x.disabled=false);
+ if(!j.ok){toast(j.err||'Erro ao salvar','err');setDirty(true);return} // não recarrega: nada do que foi digitado se perde
+ setDirty(false);toast(j.warn||'Alterações salvas ✓',j.warn?'warn':'ok');refresh()}
+function toggleSecret(btn){const el=$('pay_token');const on=el.classList.toggle('secret');btn.textContent=on?'Mostrar':'Ocultar'}
+async function testToken(btn){
+ collect();const b=cur();btn.disabled=true;btn.textContent='Testando...';
+ let j;try{j=await api('POST','/api/bots/'+b.id+'/pagbank_test',{token:$('pay_token').value.trim(),env:$('pay_env').value})}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
+ btn.disabled=false;btn.textContent='Testar token';
+ toast(j.ok?j.msg+' Agora clique em Salvar.':j.err,j.ok?'ok':'err')}
+document.addEventListener('input',e=>{if(e.target.closest('#editor')&&e.target.type!=='file')setDirty(true)});
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&cur()){e.preventDefault();save()}});
+window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
+async function toggleEnable(){
+ if(!collect())return;const b=cur();b.enabled=!b.enabled;
+ let j;try{j=await api('PUT','/api/bots/'+b.id,b)}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
+ if(!j.ok){b.enabled=!b.enabled;toast(j.err||'Erro','err');return}
+ setDirty(false);toast(b.enabled?'Bot ativado ✓':'Bot pausado','ok');refresh()}
 async function delBot(){if(!confirm('Excluir este bot?'))return;await api('DELETE','/api/bots/'+sel);sel=null;refresh()}
 async function loadLog(){if(!sel)return;const l=await api('GET','/api/bots/'+sel+'/log');const p=$('logbox');if(p)p.textContent=l.join('\n')||'(vazio)'}
 setInterval(()=>{if(sel&&tab==='t_log')loadLog()},5000);

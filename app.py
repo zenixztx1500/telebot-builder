@@ -190,14 +190,28 @@ def pagbank_headers(pay):
             "Content-Type": "application/json", "Accept": "application/json"}
 
 def pagbank_token_ok(token, env):
-    """Consulta um pedido inexistente: 404 = token aceito, 401/403 = recusado. None = sem conexão."""
+    """Consulta um pedido inexistente: só 401/403 significam token recusado. None = sem conexão."""
     url = PAGBANK_URLS["producao" if env == "producao" else "sandbox"]
     try:
         r = httpx.get(f"{url}/orders/ORDE_00000000-0000-0000-0000-000000000000",
                       headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=15)
     except Exception:
         return None
-    return r.status_code == 404
+    return r.status_code not in (401, 403)
+
+def pagbank_diagnose(token, env):
+    """Devolve (True/False/None, mensagem para o painel). Detecta token de sandbox usado em produção e vice-versa."""
+    modo = "produção" if env == "producao" else "sandbox (testes)"
+    res = pagbank_token_ok(token, env)
+    if res is None:
+        return None, "Não consegui falar com o PagBank agora. Tente de novo em instantes."
+    if res:
+        return True, f"Token aceito pelo PagBank no modo {modo}."
+    outro = "sandbox" if env == "producao" else "producao"
+    if pagbank_token_ok(token, outro):
+        certo = "Sandbox (testes)" if outro == "sandbox" else "Produção"
+        return False, f"Esse token é do modo {certo}. Mude o Ambiente para {certo} e salve de novo."
+    return False, f"O PagBank recusou esse token no modo {modo}. Copie o token de novo, inteiro e sem espaços."
 
 async def pagbank_create_pix(pay, reference, customer, lines):
     """lines = [(nome, qtd, centavos)]. Devolve (order_id, copia_e_cola, url_png_do_qr)."""
@@ -363,7 +377,11 @@ def build_app(bot):
         await message.reply_text(f"💳 Pedido criado! Total: {fmt_price(total / 100)}")
         if png:
             try:
-                await message.reply_photo(photo=png, caption="📷 Escaneie o QR Code no app do seu banco.")
+                # Baixa a imagem aqui (mais confiável do que o Telegram buscar o link sozinho).
+                async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+                    r = await client.get(png)
+                foto = io.BytesIO(r.content) if r.status_code == 200 and r.content else png
+                await message.reply_photo(photo=foto, caption="📷 Escaneie o QR Code no app do seu banco.")
             except Exception as e:
                 log(bid, "WARN", f"imagem do QR: {e}")
         await message.reply_text(
@@ -877,6 +895,7 @@ def api_update(bid):
         b = next((x for x in bots if x["id"] == bid), None)
         if not b:
             return jsonify(ok=False, err="Bot não encontrado"), 404
+        warn = None
         if "payment" in body:
             # O navegador nunca recebe o token do PagBank: campo vazio = manter o token salvo.
             newp = dict(body.get("payment") or {})
@@ -886,10 +905,15 @@ def api_update(bid):
             env = "producao" if newp.get("pagbank_env") == "producao" else "sandbox"
             newp["pagbank_token"], newp["pagbank_env"] = tok, env
             changed = tok != oldp.get("pagbank_token", "") or env != (oldp.get("pagbank_env") or "sandbox")
-            if newp.get("type") == "api" and tok and changed and pagbank_token_ok(tok, env) is False:
-                modo = "produção" if env == "producao" else "sandbox (testes)"
-                return jsonify(ok=False, err=f"O PagBank recusou esse token no modo {modo}. "
-                                             "Confira o token e o ambiente escolhido."), 400
+            if newp.get("type") == "api" and tok and changed:
+                res, msg = pagbank_diagnose(tok, env)
+                if res is False:
+                    # Salva todo o resto; só o token/ambiente novos ficam de fora.
+                    newp["pagbank_token"] = oldp.get("pagbank_token", "")
+                    newp["pagbank_env"] = oldp.get("pagbank_env") or "sandbox"
+                    warn = "Tudo foi salvo, menos o token. " + msg
+                elif res is None:
+                    warn = "Salvo, mas não deu para conferir o token no PagBank agora."
             body = {**body, "payment": newp}
         for k in EDITABLE:
             if k in body:
@@ -897,7 +921,22 @@ def api_update(bid):
         b["whitelist"] = [int(x) for x in b.get("whitelist", []) if str(x).lstrip("-").isdigit()]
         save_bots(uid, bots)
     start_worker(uid, bid)  # reinicia se estiver ativo; se pausado, só para
-    return jsonify(ok=True)
+    return jsonify(ok=True, warn=warn)
+
+@app.route("/api/bots/<bid>/pagbank_test", methods=["POST"])
+@login_required
+def api_pagbank_test(bid):
+    """Botão 'Testar token' do painel: confere o token digitado (ou o salvo) sem salvar nada."""
+    d = request.get_json(force=True) or {}
+    b = next((x for x in load_bots(session["uid"]) if x["id"] == bid), None)
+    if not b:
+        return jsonify(ok=False, err="Bot não encontrado"), 404
+    env = "producao" if d.get("env") == "producao" else "sandbox"
+    tok = (d.get("token") or "").strip() or (b.get("payment") or {}).get("pagbank_token", "")
+    if not tok:
+        return jsonify(ok=False, err="Cole o token do PagBank primeiro.")
+    res, msg = pagbank_diagnose(tok, env)
+    return jsonify(ok=bool(res), msg=msg, err=None if res else msg)
 
 @app.route("/api/bots/<bid>", methods=["DELETE"])
 @login_required
