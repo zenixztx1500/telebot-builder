@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """TeleBot Builder - painel Flask multi-cliente (contas + Postgres) para criar e gerenciar bots do Telegram."""
-import asyncio, base64, datetime, io, json, os, re, threading, time, uuid, urllib.request, urllib.error
+import asyncio, base64, datetime, io, json, os, re, threading, time, unicodedata, uuid, urllib.request, urllib.error
+import segno
 import httpx  # importar aqui (thread principal) evita erro de módulo parcialmente inicializado quando vários bots sobem ao mesmo tempo
 import anyio._backends._asyncio  # idem: o anyio carrega esse backend sob demanda e várias threads ao mesmo tempo quebram o import
 from functools import wraps
@@ -183,6 +184,54 @@ def cpf_ok(cpf):
 
 def email_ok(email):
     return re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) is not None
+
+# ---------------- Pix com valor exato (BR Code estático do Banco Central, sem intermediador) ----------------
+def _emv(tag, value):
+    return f"{tag}{len(value):02d}{value}"
+
+def crc16_ccitt(data):
+    crc = 0xFFFF
+    for byte in data.encode("utf-8"):
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else (crc << 1)
+            crc &= 0xFFFF
+    return f"{crc:04X}"
+
+def pix_ascii(s, limit):
+    """Nome/cidade no BR Code: sem acento, maiúsculas, só letras/números/espaço."""
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Za-z0-9 ]", "", s).strip().upper()[:limit]
+
+def pix_key_normalize(key):
+    """E-mail em minúsculas; CPF/CNPJ só números; telefone +55...; chave aleatória como está."""
+    k = (key or "").strip()
+    if "@" in k:
+        return k.lower()
+    digits = re.sub(r"\D", "", k)
+    if k.startswith("+"):
+        return "+" + digits
+    if re.fullmatch(r"[\d.\-/ ()]+", k):
+        if "(" in k or len(digits) == 10:  # telefone com DDD
+            return "+55" + digits
+        if len(digits) in (12, 13) and digits.startswith("55"):
+            return "+" + digits
+        return digits  # CPF (11) ou CNPJ (14)
+    return k
+
+def pix_brcode(key, name, city, amount_cents, txid):
+    """Pix copia e cola (EMV/BR Code) com valor fixo. txid: até 25 letras/números, aparece no extrato de vários bancos."""
+    mai = _emv("00", "br.gov.bcb.pix") + _emv("01", pix_key_normalize(key))
+    payload = (_emv("00", "01") + _emv("26", mai) + _emv("52", "0000") + _emv("53", "986")
+               + _emv("54", f"{amount_cents / 100:.2f}") + _emv("58", "BR")
+               + _emv("59", pix_ascii(name, 25) or "RECEBEDOR") + _emv("60", pix_ascii(city, 15) or "BRASIL")
+               + _emv("62", _emv("05", re.sub(r"[^A-Za-z0-9]", "", txid)[:25] or "***")) + "6304")
+    return payload + crc16_ccitt(payload)
+
+def qr_png(text):
+    buf = io.BytesIO()
+    segno.make(text, error="m").save(buf, kind="png", scale=8, border=2)
+    return buf.getvalue()
 
 # ---------------- Pix automático por token de API (PagBank, Mercado Pago, Asaas) ----------------
 # Cada intermediador implementa: token_ok (sync), create (async) e is_paid (async).
@@ -574,15 +623,59 @@ def build_app(bot):
         if payment.get("type") != "api" or not gw_token(payment):
             return
         for order_id in pending_orders(bid):
+            if order_id.startswith("manual:"):  # Pix com valor exato: quem confirma é o vendedor
+                continue
             try:
                 if await gateway_is_paid(payment, order_id):
                     await notify_paid(bot_api, order_id)
             except Exception as e:
                 log(bid, "ERR", f"verificar {order_id}: {e}")
 
+    admin_id = str(payment.get("admin_chat_id") or "").strip()
+    admin_id = int(admin_id) if admin_id.lstrip("-").isdigit() else None
+    pix_avisados = set()  # pedidos em que o cliente já tocou "Já paguei" (evita spam para o vendedor)
+
+    def confirm_kb(key):
+        return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Confirmar pagamento", callback_data=f"manconf|{key}")]])
+
+    async def pixqr_checkout(message, user, items):
+        """Pix com valor exato: gera o BR Code aqui mesmo, sem pedir dados do cliente. Confirmação é do vendedor."""
+        key_pix = (payment.get("pix_key") or "").strip()
+        lines = cart_lines(items)
+        if not key_pix or not lines:
+            await message.reply_text("Pagamento não configurado — fale com o vendedor.")
+            return
+        total = sum(q * c for _, q, c in lines)
+        txid = "PED" + uuid.uuid4().hex[:10].upper()
+        code = pix_brcode(key_pix, payment.get("pix_name") or "", payment.get("pix_city") or "", total, txid)
+        key = f"manual:{txid}"
+        nome = getattr(user, "full_name", "") or "Cliente"
+        summary = (f"Cliente: {nome} (@{user.username or 'sem username'}, ID {user.id})\n\n"
+                   + "\n".join(f"{q}x {n}" for n, q, _ in lines)
+                   + f"\n\nTotal: {fmt_price(total / 100)}\nIdentificador no Pix: {txid}")
+        try:
+            save_order(key, bid, message.chat_id, summary, total)
+        except Exception as e:
+            log(bid, "ERR", f"salvar pedido {key}: {e}")
+        log(bid, "PIX", f"{user.id} pedido {txid} {fmt_price(total / 100)} (valor exato)")
+        await message.reply_photo(photo=io.BytesIO(qr_png(code)),
+                                  caption=f"📷 Escaneie no app do seu banco — o valor de {fmt_price(total / 100)} já vem preenchido.")
+        instr = (payment.get("instructions") or "").strip()
+        await message.reply_text(
+            f"Pix copia e cola (toque para copiar):\n\n`{code}`\n\n"
+            + (instr + "\n\n" if instr else "") + "Depois de pagar, toque no botão abaixo.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Já paguei", callback_data=f"manpaid|{key}")]]))
+        if admin_id:
+            try:
+                await message.get_bot().send_message(admin_id, f"🆕 Pedido {txid} aguardando Pix\n\n{summary}",
+                                                     reply_markup=confirm_kb(key))
+            except Exception as e:
+                log(bid, "WARN", f"aviso ao vendedor: {e}")
+
     async def send_payment(message, items_desc=None, items=None, user=None):
         ptype = (payment or {}).get("type") or ""
-        if ptype in ("pix", "api") and items_desc:
+        if ptype in ("pix", "api", "pixqr") and items_desc:
             await message.reply_text(f"🧾 *Resumo da compra:*\n{items_desc}", parse_mode="Markdown")
         if ptype == "pix":
             key = payment.get("pix_key") or "(chave não configurada)"
@@ -598,6 +691,8 @@ def build_app(bot):
                 await message.reply_photo(photo=io.BytesIO(qimg[1]), caption="📷 QR Code Pix")
         elif ptype == "api" and items and user:
             await api_checkout(message, user, items)
+        elif ptype == "pixqr" and items and user:
+            await pixqr_checkout(message, user, items)
         else:
             await message.reply_text("Pagamento não configurado — fale com o vendedor.")
 
@@ -768,6 +863,43 @@ def build_app(bot):
             await q.answer()
             await do_checkout(q.message, u)
             log(bid, "COMPRA", f"{u.id} finalizou carrinho")
+            return
+        if data.startswith("manpaid|"):  # cliente avisa que pagou o Pix com valor exato
+            key = data.split("|", 1)[1]
+            await q.answer()
+            status = order_paid(key, bid)
+            if status:
+                await q.message.reply_text("✅ Esse pagamento já foi confirmado.")
+            elif key in pix_avisados:
+                await q.message.reply_text("Já avisei o vendedor. Assim que ele conferir, você recebe a confirmação aqui.")
+            else:
+                pix_avisados.add(key)
+                await q.message.reply_text("Obrigado! Avisei o vendedor — assim que ele conferir o Pix, você recebe a confirmação aqui.")
+                log(bid, "COMPRA", f"{u.id} avisou que pagou {key.split(':', 1)[1]}")
+                if admin_id:
+                    try:
+                        await ctx.bot.send_message(admin_id, f"💬 O cliente {getattr(u, 'full_name', '') or u.id} diz que pagou o pedido "
+                                                             f"{key.split(':', 1)[1]}. Confira no app do banco e toque em Confirmar.",
+                                                   reply_markup=confirm_kb(key))
+                    except Exception as e:
+                        log(bid, "WARN", f"aviso ao vendedor: {e}")
+            return
+        if data.startswith("manconf|"):  # vendedor confirma o Pix com valor exato
+            key = data.split("|", 1)[1]
+            if u.id != admin_id:
+                await q.answer("Só o vendedor pode confirmar pagamentos.", show_alert=True)
+                return
+            row = mark_paid(key)
+            await q.answer("Pagamento confirmado!" if row else "Esse pedido já estava confirmado.")
+            if row:
+                chat_id, _ = row
+                await ctx.bot.send_message(chat_id, "✅ Pagamento confirmado pelo vendedor! Obrigado pela compra.")
+                log(bid, "PAGO", f"{key.split(':', 1)[1]} confirmado pelo vendedor")
+            try:
+                await q.edit_message_reply_markup(reply_markup=None)
+                await q.message.reply_text(f"✅ Pedido {key.split(':', 1)[1]} confirmado. O cliente foi avisado.")
+            except Exception:
+                pass
             return
         if data.startswith("pixchk|"):
             order_id = data.split("|", 1)[1]
@@ -1038,6 +1170,11 @@ def api_update(bid):
                     warn = f"Salvo, mas não deu para conferir o token no {label} agora."
             elif newp.get("type") == "api" and not tok:
                 warn = f"Salvo. Falta colar o token do {label} para o Pix automático funcionar."
+            if newp.get("type") == "pixqr":
+                if not (newp.get("pix_key") or "").strip():
+                    warn = "Salvo. Falta a sua chave Pix para o bot montar o QR Code."
+                elif not str(newp.get("admin_chat_id") or "").strip().lstrip("-").isdigit():
+                    warn = "Salvo. Coloque o seu ID do Telegram, senão você não recebe os pedidos para confirmar."
             body = {**body, "payment": newp}
         for k in EDITABLE:
             if k in body:

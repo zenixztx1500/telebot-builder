@@ -177,6 +177,7 @@ const MODE_META={
 const PAY_META={
  '':{label:'Nenhum',desc:'Pagamento desativado — o bot não vai enviar nenhuma opção de pagamento.'},
  'api':{label:'Atendimento automático (API de pagamento)',desc:'Pix automático pelo PagBank, Mercado Pago ou Asaas: o bot pede nome, CPF e e-mail do cliente, gera o QR Code com o valor exato, confirma o pagamento sozinho e avisa você e o cliente.'},
+ 'pixqr':{label:'Pix com valor exato (sem dados do cliente)',desc:'O bot monta o QR Code Pix com a sua chave e o valor exato do carrinho, sem pedir CPF nem e-mail. Você recebe cada pedido no Telegram e confirma com um toque; o bot avisa o cliente.'},
  'pix':{label:'Atendimento direto (chave Pix)',desc:'O bot envia sua chave Pix e instruções; o cliente paga manualmente e você confirma o recebimento por fora.'}
 };
 let bots=[],sel=null,tab='t_cmd';
@@ -321,6 +322,18 @@ function payBlock(b){
    +'<label>Nome do recebedor</label><input id="pay_pixname" value="'+esc(b.payment.pix_name||'')+'" placeholder="Nome que aparece no Pix">'
    +'<label>Instruções para o cliente</label><textarea id="pay_instructions" rows="3" placeholder="Ex: envie o comprovante aqui depois de pagar.">'+esc(b.payment.instructions||'')+'</textarea>'
    +'<label>Imagem do QR Code (opcional)</label><div class="row" style="align-items:center">'+thumb+'<input type="file" accept="image/*" onchange="uploadQr(this)"></div>';
+ }else if(t==='pixqr'){
+  const okKey=(b.payment.pix_key||'').trim();
+  extra=(okKey
+    ?'<div class="statusbox ok"><span>✅</span><div><b>Pix com valor exato ativo</b>O cliente não precisa informar nenhum dado. Você recebe cada pedido no Telegram com o botão Confirmar pagamento.</div></div>'
+    :'<div class="statusbox warn"><span>⚠️</span><div><b>Falta a sua chave Pix</b>Sem ela o bot não consegue montar o QR Code.</div></div>')
+   +'<label>Sua chave Pix</label><input id="pay_pixkey" value="'+esc(b.payment.pix_key||'')+'" placeholder="CPF, CNPJ, e-mail, telefone (+55 11 9...) ou chave aleatória">'
+   +'<small class="tip">Telefone: use o formato +55 com DDD, por exemplo +55 11 98765-4321.</small>'
+   +'<div class="row"><div><label>Nome do recebedor</label><input id="pay_pixname" maxlength="25" value="'+esc(b.payment.pix_name||'')+'" placeholder="Como aparece no Pix"></div>'
+   +'<div><label>Cidade</label><input id="pay_pixcity" maxlength="15" value="'+esc(b.payment.pix_city||'')+'" placeholder="Ex: São Paulo"></div></div>'
+   +'<label>Instruções para o cliente (opcional)</label><textarea id="pay_instructions" rows="2" placeholder="Ex: o acesso é enviado aqui no chat depois da confirmação.">'+esc(b.payment.instructions||'')+'</textarea>'
+   +'<label>Seu ID do Telegram (recebe cada pedido com o botão Confirmar pagamento)</label><input id="pay_admin" value="'+esc(b.payment.admin_chat_id||'')+'" placeholder="Ex: 123456789 — descubra com o @userinfobot">'
+   +'<small class="tip">Mande /start para o seu próprio bot uma vez. Sem o seu ID, ninguém consegue confirmar os pagamentos.</small>';
  }else if(t==='api'){
   const gw=GATEWAY_META[b.payment.gateway]?b.payment.gateway:'pagbank';
   const G=GATEWAY_META[gw];
@@ -421,6 +434,7 @@ function collect(){ // lê os campos da tela para o objeto local; devolve false 
   if($('pay_pixkey'))b.payment.pix_key=$('pay_pixkey').value;
   if($('pay_pixname'))b.payment.pix_name=$('pay_pixname').value;
   if($('pay_instructions'))b.payment.instructions=$('pay_instructions').value;
+  if($('pay_pixcity'))b.payment.pix_city=$('pay_pixcity').value;
   if($('pay_gateway'))b.payment.gateway=$('pay_gateway').value;
   if($('pay_env'))b.payment.api_env=$('pay_env').value;
   if($('pay_token'))b.payment.api_token=$('pay_token').value.trim();

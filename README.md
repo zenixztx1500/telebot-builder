@@ -15,6 +15,11 @@ Abra http://127.0.0.1:5000
 3. Configure comandos, respostas automáticas, botões, filtros e permissões e clique em Salvar (o bot reinicia sozinho).
 4. A aba Log mostra o que o bot recebeu e enviou. Se aparecer ERR, o token ou a internet estão com problema.
 
+## Pix com valor exato (sem pedir dados do cliente)
+Na aba **Pagamento**, escolha "Pix com valor exato (sem dados do cliente)" e informe sua chave Pix, nome, cidade e seu ID do Telegram.
+O bot monta o QR Code Pix (BR Code do Banco Central) com o valor exato do carrinho, sem intermediador e sem pedir CPF ou e-mail.
+Você recebe cada pedido no Telegram com o botão **✅ Confirmar pagamento**; o cliente tem o botão **Já paguei**, que te avisa. Ao confirmar, o bot avisa o cliente. Não há confirmação automática: confira o Pix no app do seu banco (o identificador `PED...` do pedido aparece no Pix).
+
 ## Pagamento automático (Pix por API)
 Na aba **Pagamento**, escolha "Atendimento automático (API de pagamento)" e o intermediador:
 
