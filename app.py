@@ -1213,10 +1213,8 @@ def build_app(bot):
     descr.update({n: "Enviar meu contato" for n in cmd_contact})
     descr.update({n: "Enviar minha localização" for n in cmd_location})
     descr.update({n: "Finalizar compra" for n in cmd_payment})
-    descr.setdefault("start", "Começar")
-    if products:
-        descr.setdefault("catalogo", "Ver produtos")
-        descr.setdefault("carrinho", "Ver carrinho")
+    descr["start"] = "Começar"  # sempre a mesma descrição, qualquer que seja a ação do /start
+    # /catalogo e /carrinho continuam funcionando se digitados, mas só entram no Menu se o vendedor os criar
     cmd_meta = [(n, d) for n, d in sorted(descr.items(), key=lambda x: (x[0] != "start",)) if n in cmd_handlers]
     a.bot_data["cmd_names"] = cmd_meta
     a.bot_data["check_pending"] = check_pending
