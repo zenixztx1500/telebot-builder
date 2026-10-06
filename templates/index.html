@@ -345,7 +345,7 @@ const MODE_META={
  'exact':{label:'Exata',desc:'Só dispara quando a mensagem for exatamente igual a essa palavra ou frase.'}
 };
 const PAY_META={ // a ordem aqui é a ordem dos cartões
- 'api':{label:'Pix automático',desc:'Mercado Pago, PagBank ou Asaas geram a cobrança e o bot confirma o pagamento sozinho. Pede nome, CPF e e-mail do cliente.'},
+ 'api':{label:'Pix automático',desc:'Mercado Pago, PagBank ou Asaas geram a cobrança e o bot confirma o pagamento sozinho. Pedir os dados do cliente é opcional.'},
  'pixqr':{label:'Pix com valor exato',desc:'QR Code com a sua chave e o valor do carrinho, sem pedir dados do cliente. Você confirma cada pedido com um toque no Telegram.'},
  'pix':{label:'Chave Pix simples',desc:'O bot envia sua chave Pix e instruções. O cliente digita o valor e você confere por fora.'},
  '':{label:'Sem pagamento',desc:'O bot não oferece nenhuma opção de pagamento.'}
@@ -553,6 +553,15 @@ function payBlock(b){
      +'<button class="btn" type="button" onclick="testToken(this)">Testar token</button></div>',G.where+' O token nunca volta para o navegador.')
    +adminField(b,'Recebe o aviso de cada venda paga.')
    +'</div></section>'
+   +'<section class="card"><div class="card-head"><div><h2>Dados do cliente</h2><p>O intermediador exige um pagador em cada cobrança.</p></div></div><div class="card-body">'
+   +'<div class="setting"><label class="switch"><input type="checkbox" id="pay_ask" '+(b.payment.ask_customer!==false?'checked':'')+' onchange="collect();renderEditor()"><i></i></label><div><b>Pedir dados do cliente</b><span>Ligado: o bot pergunta nome, CPF e e-mail na primeira compra. Desligado: o bot gera o Pix direto, sem perguntar nada, e envia ao '+G.label+' os dados padrão abaixo.</span></div></div>'
+   +(b.payment.ask_customer===false
+     ?'<div class="setting" style="display:block">'
+      +callout('warn','alert','Use os seus próprios dados','Estes dados vão para o '+G.label+' no lugar dos dados do cliente, em todas as cobranças. Cobrar sem identificar o pagador pode ir contra as regras do intermediador, e a conta pode ser limitada.')
+      +'<div class="grid2">'+field('E-mail padrão','<input id="pay_demail" inputmode="email" value="'+esc(b.payment.default_email||'')+'" placeholder="nome@exemplo.com">',gw==='mercadopago'?'Não pode ser o e-mail da conta do Mercado Pago que recebe.':'')
+      +field('CPF padrão'+(gw==='mercadopago'?' (opcional)':''),'<input id="pay_dcpf" inputmode="numeric" value="'+esc(b.payment.default_cpf||'')+'" placeholder="Só números">',gw==='mercadopago'?'Se o Mercado Pago recusar a cobrança sem CPF, preencha aqui.':'O '+G.label+' não gera cobrança sem CPF.')+'</div></div>'
+     :'')
+   +'</div></section>'
    +'<section class="card"><div class="card-head"><div><h2>Chave Pix reserva<span class="badge">Opcional</span></h2><p>Se o '+G.label+' recusar a cobrança, o bot envia um Pix com valor exato para esta chave em vez de perder a venda.</p></div></div><div class="card-body">'
    +pixFields(b)+'</div></section>';
  }
@@ -636,6 +645,9 @@ function collect(){ // lê os campos da tela para o objeto local
   if($('pay_env'))b.payment.api_env=$('pay_env').value;
   if($('pay_token'))b.payment.api_token=$('pay_token').value.trim();
   if($('pay_admin'))b.payment.admin_chat_id=$('pay_admin').value.trim();
+  if($('pay_ask'))b.payment.ask_customer=$('pay_ask').checked;
+  if($('pay_demail'))b.payment.default_email=$('pay_demail').value.trim();
+  if($('pay_dcpf'))b.payment.default_cpf=$('pay_dcpf').value.trim();
  }
  return true}
 function add(list,obj){if(!collect())return;cur()[list].push(obj);setDirty(true);renderEditor()}

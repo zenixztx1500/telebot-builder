@@ -264,6 +264,21 @@ def gw_env(pay):
     pay = pay or {}
     return "producao" if (pay.get("api_env") or pay.get("pagbank_env")) == "producao" else "sandbox"
 
+def skip_customer_ready(pay):
+    """(pode_pular, motivo). Só pula as perguntas ao cliente se o vendedor desligou a opção E cadastrou
+    os dados padrão que o intermediador exige: e-mail sempre; CPF no PagBank e no Asaas."""
+    pay = pay or {}
+    if pay.get("ask_customer", True) is not False:
+        return False, ""
+    if not email_ok((pay.get("default_email") or "").strip()):
+        return False, "Falta o e-mail padrão da cobrança"
+    cpf = re.sub(r"\D", "", pay.get("default_cpf") or "")
+    if cpf and not cpf_ok(cpf):
+        return False, "O CPF padrão é inválido"
+    if gw_name(pay) != "mercadopago" and not cpf:
+        return False, f"O {GATEWAYS[gw_name(pay)]['label']} exige CPF: preencha o CPF padrão"
+    return True, ""
+
 def gw_url(gw, env):
     return GATEWAYS[gw]["urls"]["producao" if env == "producao" else "sandbox"]
 
@@ -340,9 +355,10 @@ async def _mercadopago_create(base, h, reference, customer, lines, total):
         "description": ", ".join(f"{q}x {n}" for n, q, _ in lines)[:250],
         "payment_method_id": "pix",
         "external_reference": reference,
-        "payer": {"email": customer["email"], "first_name": nome[0], "last_name": " ".join(nome[1:]) or nome[0],
-                  "identification": {"type": "CPF", "number": customer["cpf"]}},
+        "payer": {"email": customer["email"], "first_name": nome[0], "last_name": " ".join(nome[1:]) or nome[0]},
     }
+    if customer.get("cpf"):  # sem CPF (modo "não pedir dados"), o Mercado Pago recebe só o e-mail
+        body["payer"]["identification"] = {"type": "CPF", "number": customer["cpf"]}
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(f"{base}/v1/payments", headers={**h, "X-Idempotency-Key": reference}, json=body)
     if r.status_code not in (200, 201):
@@ -563,7 +579,7 @@ def build_app(bot):
     async def create_and_send_pix(message, user, lines, customer):
         total = sum(q * c for _, q, c in lines)
         summary = (f"Cliente: {customer['nome']} (@{user.username or 'sem username'}, ID {user.id})\n"
-                   f"E-mail: {customer['email']}\n\n"
+                   + ("" if customer.get("padrao") else f"E-mail: {customer['email']}\n") + "\n"
                    + "\n".join(f"{q}x {n}" for n, q, _ in lines) + f"\n\nTotal: {fmt_price(total / 100)}")
         try:
             order_id, copia, qr = await gateway_create_pix(
@@ -607,6 +623,18 @@ def build_app(bot):
                                                                      callback_data=f"pixchk|{order_id}")]]))
         remember_pix(order_id, foto_msg, copia_msg)
 
+    def default_customer(user):
+        """Dados padrão cadastrados pelo vendedor, usados quando 'Pedir dados do cliente' está desligado.
+        Devolve None se a opção está ligada ou se faltam os dados que o intermediador exige."""
+        ok, _ = skip_customer_ready(payment)
+        if not ok:
+            return None
+        nome = (getattr(user, "full_name", "") or "").strip() or "Cliente Telegram"
+        if len(nome.split()) < 2:
+            nome += " Cliente"
+        return {"nome": nome[:100], "cpf": re.sub(r"\D", "", payment.get("default_cpf") or ""),
+                "email": payment["default_email"].strip(), "padrao": True}
+
     async def api_checkout(message, user, items):
         if not gw_token(payment):
             track(await message.reply_text("Pagamento automático não configurado — fale com o vendedor."))
@@ -614,6 +642,10 @@ def build_app(bot):
         lines = cart_lines(items)
         if not lines:
             track(await message.reply_text("Esses produtos estão sem preço. Fale com o vendedor."))
+            return
+        padrao = default_customer(user)
+        if padrao:  # vendedor desligou "Pedir dados do cliente": gera o Pix direto, sem perguntar nada
+            await create_and_send_pix(message, user, lines, padrao)
             return
         if user.id in customers:
             await create_and_send_pix(message, user, lines, customers[user.id])
@@ -1256,6 +1288,10 @@ def api_update(bid):
                     warn = f"Salvo, mas não deu para conferir o token no {label} agora."
             elif newp.get("type") == "api" and not tok:
                 warn = f"Salvo. Falta colar o token do {label} para o Pix automático funcionar."
+            if newp.get("type") == "api" and newp.get("ask_customer", True) is False and not warn:
+                pode, motivo = skip_customer_ready(newp)
+                if not pode:
+                    warn = f"Salvo. {motivo}; até lá o bot continua pedindo os dados do cliente."
             if newp.get("type") == "pixqr":
                 if not (newp.get("pix_key") or "").strip():
                     warn = "Salvo. Falta a sua chave Pix para o bot montar o QR Code."
