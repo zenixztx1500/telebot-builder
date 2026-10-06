@@ -12,6 +12,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response
 from telegram import (Update, BotCommand, InlineKeyboardButton,
                       InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton)
+from telegram.helpers import escape_markdown
 from telegram.ext import (Application, CommandHandler, MessageHandler,
                           CallbackQueryHandler, filters)
 
@@ -866,7 +867,27 @@ def build_app(bot):
             cats.setdefault(c, []).append(idx)
         return cats
 
+    async def send_categories(message):
+        """Lista de categorias para o cliente escolher (o botão guarda a posição, não o nome: nomes longos estouram o limite do Telegram)."""
+        cats = get_categories()
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{c} ({len(idxs)})", callback_data=f"catsel|{i}")]
+                                    for i, (c, idxs) in enumerate(cats.items())])
+        track(await message.reply_text("📂 *Escolha uma categoria:*", parse_mode="Markdown", reply_markup=kb))
+
     async def send_category(message, cat, idxs):
+        varias = len(get_categories()) > 1
+        if varias or cat != "Geral":  # cabeçalho: deixa claro de qual categoria são os produtos abaixo
+            n = len(idxs)
+            track(await message.reply_text(
+                f"📂 *Categoria: {escape_markdown(cat)}*\n{n} {'produto' if n == 1 else 'produtos'} nesta categoria:",
+                parse_mode="Markdown"))
+        await send_products(message, idxs)
+        if varias:
+            track(await message.reply_text(
+                f"Esses são os produtos de *{escape_markdown(cat)}*.", parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ver outras categorias", callback_data="catback")]])))
+
+    async def send_products(message, idxs):
         for idx in idxs:
             p = products[idx]
             caption = f"*{p.get('name') or 'Produto'}*\n{p.get('price') or ''}\n\n{p.get('description') or ''}".strip()
@@ -893,9 +914,7 @@ def build_app(bot):
             cat = next(iter(cats))
             await send_category(update.message, cat, cats[cat])
         else:
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{c} ({len(idxs)})", callback_data=f"catsel|{c}")]
-                                        for c, idxs in cats.items()])
-            track(await update.message.reply_text("📂 *Escolha uma categoria:*", parse_mode="Markdown", reply_markup=kb))
+            await send_categories(update.message)
         log(bid, "CATALOGO", f"{update.effective_user.id}: {len(products)} produtos")
 
     async def on_cart(update, ctx):
@@ -1020,11 +1039,23 @@ def build_app(bot):
         data = q.data or ""
         u = update.effective_user
         if data.startswith("catsel|"):
-            cat = data.split("|", 1)[1]
-            idxs = get_categories().get(cat, [])
+            ref = data.split("|", 1)[1]
+            cats = get_categories()
+            nomes = list(cats)
+            # posição da categoria (formato atual) ou o próprio nome (botões enviados antes desta versão)
+            cat = nomes[int(ref)] if ref.isdigit() and int(ref) < len(nomes) and ref not in cats else ref
             await q.answer()
             await clean(ctx.bot, q.message.chat_id)  # some a lista de categorias e o que estava aberto antes
-            await send_category(q.message, cat, idxs)
+            if cat in cats:
+                await send_category(q.message, cat, cats[cat])
+                log(bid, "CATALOGO", f"{u.id} abriu a categoria {cat}")
+            else:
+                await send_categories(q.message)  # a categoria mudou no painel: mostra a lista atual
+            return
+        if data == "catback":
+            await q.answer()
+            await clean(ctx.bot, q.message.chat_id)
+            await send_categories(q.message)
             return
         if data.startswith("addcart|"):
             idx = int(data.split("|", 1)[1])
