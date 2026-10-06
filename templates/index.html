@@ -280,8 +280,9 @@ body.dirty .unsaved{display:inline-flex}
   <div class="side-head"><span>Seus bots</span><button class="iconbtn" id="newbtn" onclick="newBot()" title="Novo bot" aria-label="Novo bot"></button></div>
   <nav id="list" class="botlist"></nav>
   <div class="side-foot">
-   <button class="btn ghost sm" id="themebtn" onclick="toggleTheme()"></button>
-   <button class="btn ghost sm" id="outbtn" onclick="logout()"></button>
+   <button class="btn ghost sm" id="themebtn" onclick="toggleTheme()" title="Alternar tema claro e escuro"></button>
+   <button class="btn ghost sm" id="accbtn" onclick="openAccount()" title="Senha e verificação em duas etapas"></button>
+   <button class="btn ghost sm" id="outbtn" onclick="logout()" title="Sair da conta"></button>
   </div>
  </aside>
  <main class="main">
@@ -294,7 +295,9 @@ body.dirty .unsaved{display:inline-flex}
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const api=(m,p,b)=>fetch(p,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined}).then(r=>r.json());
+// X-Requested-With: o servidor só aceita alterações que vêm do próprio painel (proteção contra CSRF)
+const api=(m,p,b)=>fetch(p,{method:m,headers:{'Content-Type':'application/json','X-Requested-With':'fetch'},body:b?JSON.stringify(b):undefined})
+ .then(r=>{if(r.status===401){window.onbeforeunload=null;dirty=false;location.href='/login'}return r.json()});
 
 // ---------- ícones (traço, 24x24) ----------
 const ICONS={
@@ -411,8 +414,49 @@ function toggleTheme(){
 function paintChrome(){
  const dark=document.documentElement.dataset.theme==='dark';
  $('logo').innerHTML=I('send',15);$('newbtn').innerHTML=I('plus');
- $('themebtn').innerHTML=I(dark?'sun':'moon')+'<span>'+(dark?'Tema claro':'Tema escuro')+'</span>';
+ $('themebtn').innerHTML=I(dark?'sun':'moon')+'<span>Tema</span>';
+ $('accbtn').innerHTML=I('shield')+'<span>Conta</span>';
  $('outbtn').innerHTML=I('logout')+'<span>Sair</span>'}
+
+// ---------- conta: senha e verificação em duas etapas ----------
+const pwField=(name,label,auto)=>field(label,'<input name="'+name+'" type="password" required autocomplete="'+auto+'">');
+function accAct(fn){document.querySelector('.modal [data-x]').click();setTimeout(fn,60)}
+async function openAccount(){
+ const a=await api('GET','/api/account');if(!a.ok)return;
+ const linha=(ok,t,d)=>'<div class="setting"><span class="badge '+(ok?'ok':'warn')+'">'+(ok?'Ligada':'Desligada')+'</span><div><b>'+t+'</b><span>'+d+'</span></div></div>';
+ await modal({title:'Segurança da conta',ok:'Fechar',desc:esc(a.email),
+  body:linha(a.twofa,'Verificação em duas etapas',a.twofa?'Além da senha, o login pede um código do aplicativo. Códigos reserva restantes: '+a.backup_left+'.':'Além da senha, o login pede um código de 6 dígitos do aplicativo no seu celular.')
+   +linha(a.email_check,'Confirmação de e-mail no cadastro',a.email_check?'Contas novas só são criadas depois do código enviado por e-mail.':'Precisa de um servidor de e-mail configurado no servidor (variáveis SMTP).')
+   +linha(a.encrypted,'Criptografia dos dados no banco',a.encrypted?'Tokens e dados de pedidos são gravados cifrados.':'Defina a variável DATA_KEY no servidor para cifrar tokens e dados de pedidos.')
+   +'<div class="inline" style="margin-top:18px;flex-wrap:wrap">'
+   +(a.twofa?'<button type="button" class="btn danger" onclick="accAct(disable2fa)">Desativar duas etapas</button>':'<button type="button" class="btn primary" onclick="accAct(enable2fa)">Ativar duas etapas</button>')
+   +'<button type="button" class="btn" onclick="accAct(changePassword)">Trocar senha</button></div>'})}
+async function enable2fa(){
+ const s=await api('POST','/api/2fa/setup',{});if(!s.ok){toast(s.err,'err');return}
+ const v=await modal({title:'Ativar verificação em duas etapas',ok:'Ativar',
+  desc:'Abra o Google Authenticator (ou outro aplicativo de códigos), escaneie o QR Code e digite o código de 6 dígitos que aparecer.',
+  body:field('Código de 6 dígitos','<input name="code" inputmode="numeric" maxlength="6" required autocomplete="one-time-code" placeholder="000000">')
+   +'<div style="text-align:center;margin-bottom:16px"><img src="'+s.qr+'" alt="QR Code" style="width:176px;height:176px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px"></div>'
+   +field('Não consegue escanear? Digite esta chave no aplicativo','<input class="mono" readonly value="'+esc(s.secret)+'">')});
+ if(!v)return;
+ const j=await api('POST','/api/2fa/enable',{code:v.code});
+ if(!j.ok){toast(j.err,'err');return}
+ await modal({title:'Guarde os códigos reserva',ok:'Já guardei',
+  desc:'Se você perder o celular, cada código abaixo entra uma vez no lugar do código do aplicativo. Eles não aparecem de novo.',
+  body:'<textarea class="mono" rows="8" readonly>'+esc(j.backup_codes.join('\n'))+'</textarea>'});
+ toast('Verificação em duas etapas ativada','ok')}
+async function disable2fa(){
+ const v=await modal({title:'Desativar verificação em duas etapas',ok:'Desativar',danger:true,desc:'O login volta a pedir só a senha.',
+  body:pwField('password','Sua senha','current-password')+field('Código do aplicativo ou código reserva','<input name="code" required autocomplete="one-time-code">')});
+ if(!v)return;
+ const j=await api('POST','/api/2fa/disable',v);
+ toast(j.ok?'Verificação em duas etapas desativada':j.err,j.ok?'ok':'err')}
+async function changePassword(){
+ const v=await modal({title:'Trocar senha',ok:'Trocar senha',desc:'Use pelo menos 8 caracteres, com letras e números.',
+  body:pwField('current','Senha atual','current-password')+pwField('new','Nova senha','new-password')});
+ if(!v)return;
+ const j=await api('POST','/api/account/password',v);
+ toast(j.ok?'Senha alterada':j.err,j.ok?'ok':'err')}
 
 // ---------- lista de bots ----------
 async function refresh(){bots=await api('GET','/api/bots');if(sel&&!cur())sel=null;if(!sel&&bots.length)sel=bots[0].id;renderList();renderEditor()}
@@ -516,7 +560,7 @@ async function uploadImage(input,apply){
  if(!collect())return;
  try{
   const fd=new FormData();fd.append('image',input.files[0]);
-  const r=await fetch('/api/upload_image',{method:'POST',body:fd});
+  const r=await fetch('/api/upload_image',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd});
   const j=await r.json();
   if(!j.ok){toast('Erro ao enviar imagem: '+j.err,'err');return}
   apply(j.filename);
@@ -556,7 +600,7 @@ function prodCatalogHTML(b){
  let html='';
  for(const [cat,idxs] of catGroups(b)){
   html+='<section class="card"><div class="card-head"><h2>'+esc(cat)+'<span class="count">'+idxs.length+'</span></h2>'
-   +'<button class="btn sm" onclick="addProductToCat(\''+esc(cat).replace(/'/g,"\\'")+'\')">'+I('plus')+'Adicionar produto</button></div>'
+   +'<button class="btn sm" data-cat="'+esc(cat)+'" onclick="addProductToCat(this.dataset.cat)">'+I('plus')+'Adicionar produto</button></div>' // nome da categoria vai como dado, nunca como código
    +'<div>'+idxs.map(i=>prodRow(b.products[i],i)).join('')+'</div></section>';
  }
  return html}

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """TeleBot Builder - painel Flask multi-cliente (contas + Postgres) para criar e gerenciar bots do Telegram."""
-import asyncio, base64, datetime, io, json, os, re, threading, time, unicodedata, uuid, urllib.request, urllib.error
+import asyncio, base64, collections, datetime, hashlib, hmac, io, json, os, re, secrets, smtplib, ssl, struct, threading, time, unicodedata, uuid, urllib.request, urllib.error
+from email.message import EmailMessage
+from urllib.parse import urlparse, quote
 import segno
 import httpx  # importar aqui (thread principal) evita erro de módulo parcialmente inicializado quando vários bots sobem ao mesmo tempo
 import anyio._backends._asyncio  # idem: o anyio carrega esse backend sob demanda e várias threads ao mesmo tempo quebram o import
@@ -9,7 +11,7 @@ from pathlib import Path
 import psycopg2
 import psycopg2.extras
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response, abort, make_response
 from telegram import (Update, BotCommand, InlineKeyboardButton,
                       InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton)
 from telegram.helpers import escape_markdown
@@ -55,6 +57,22 @@ def init_db():
             )
         """)
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS account_security (
+                account_id INT PRIMARY KEY,
+                totp_secret TEXT,
+                backup_codes TEXT NOT NULL DEFAULT '[]'
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS signup_pending (
+                email TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                code_hash TEXT NOT NULL,
+                attempts INT NOT NULL DEFAULT 0,
+                expires DOUBLE PRECISION NOT NULL
+            )
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS pix_orders (
                 order_id TEXT PRIMARY KEY,
                 bid TEXT NOT NULL,
@@ -85,15 +103,57 @@ def get_image(fname):
         row = cur.fetchone()
         return (row[0], bytes(row[1])) if row else None
 
+# ---------------- Criptografia em repouso (opcional: ligada pela variável de ambiente DATA_KEY) ----------------
+# Com DATA_KEY definida, tokens (Telegram e intermediador), segredo do 2FA e o resumo dos pedidos (nome/e-mail
+# do cliente) são gravados cifrados no banco. Quem conseguir uma cópia do banco não consegue ler esses campos.
+# ATENÇÃO: se a DATA_KEY for trocada ou perdida, o que já foi cifrado não pode mais ser lido.
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+except ImportError:  # sem a biblioteca, segue sem cifrar
+    Fernet, InvalidToken = None, Exception
+_DATA_KEY = os.environ.get("DATA_KEY", "").strip()
+_fernet = Fernet(base64.urlsafe_b64encode(hashlib.sha256(_DATA_KEY.encode()).digest())) if (_DATA_KEY and Fernet) else None
+
+def enc(s):
+    if not s or not isinstance(s, str) or not _fernet or s.startswith("enc:"):
+        return s
+    return "enc:" + _fernet.encrypt(s.encode()).decode()
+
+def dec(s):
+    if not isinstance(s, str) or not s.startswith("enc:"):
+        return s
+    if not _fernet:
+        return ""  # cifrado, mas sem a chave neste servidor
+    try:
+        return _fernet.decrypt(s[4:].encode()).decode()
+    except InvalidToken:
+        return ""
+
+def _bots_secrets(bots, fn):
+    """Aplica fn (enc ou dec) nos campos sensíveis de cada bot, sem alterar a lista original."""
+    out = []
+    for b in bots or []:
+        b = dict(b)
+        if b.get("token"):
+            b["token"] = fn(b["token"])
+        if isinstance(b.get("payment"), dict):
+            p = dict(b["payment"])
+            for k in ("api_token", "pagbank_token"):
+                if p.get(k):
+                    p[k] = fn(p[k])
+            b["payment"] = p
+        out.append(b)
+    return out
+
 def load_bots(uid):
     with db() as conn, conn.cursor() as cur:
         cur.execute("SELECT bots FROM accounts WHERE id=%s", (uid,))
         row = cur.fetchone()
-        return row[0] if row else []
+        return _bots_secrets(row[0], dec) if row else []
 
 def save_bots(uid, bots):
     with LOCK, db() as conn, conn.cursor() as cur:
-        cur.execute("UPDATE accounts SET bots=%s WHERE id=%s", (json.dumps(bots), uid))
+        cur.execute("UPDATE accounts SET bots=%s WHERE id=%s", (json.dumps(_bots_secrets(bots, enc)), uid))
         conn.commit()
 
 def all_accounts():
@@ -104,8 +164,24 @@ def all_accounts():
 def save_order(order_id, bid, chat_id, summary, total_cents):
     with db() as conn, conn.cursor() as cur:
         cur.execute("INSERT INTO pix_orders (order_id, bid, chat_id, summary, total_cents) VALUES (%s,%s,%s,%s,%s)",
-                    (order_id, bid, chat_id, summary, total_cents))
+                    (order_id, bid, chat_id, enc(summary), total_cents))  # o resumo tem nome/e-mail do cliente
         conn.commit()
+
+def order_row(order_id, bid):
+    """(paid, chat_id) do pedido deste bot, ou None se não existe."""
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT paid, chat_id FROM pix_orders WHERE order_id=%s AND bid=%s", (order_id, bid))
+        return cur.fetchone()
+
+def purge_old_data():
+    """Minimização de dados: pedidos com mais de 90 dias e cadastros pendentes vencidos são apagados."""
+    try:
+        with db() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM pix_orders WHERE created_at < now() - interval '90 days'")
+            cur.execute("DELETE FROM signup_pending WHERE expires < %s", (time.time(),))
+            conn.commit()
+    except Exception:
+        pass
 
 def pending_orders(bid):
     """Pedidos Pix do bot ainda não pagos, criados nas últimas 24h."""
@@ -128,11 +204,22 @@ def mark_paid(order_id):
                     (order_id,))
         row = cur.fetchone()
         conn.commit()
-        return row
+        return (row[0], dec(row[1])) if row else None
+
+LOG_MAX = 512 * 1024  # cada log guarda no máximo ~512 KB; ao passar disso, fica só a metade mais recente
 
 def log(bid, kind, text):
-    with LOCK, open(LOG_DIR / f"{bid}.log", "a", encoding="utf-8") as f:
-        f.write(f"[{time.strftime('%H:%M:%S')}] {kind}: {text}\n")
+    path = LOG_DIR / f"{re.sub(r'[^\w-]', '', str(bid))}.log"
+    linha = re.sub(r"[\r\n]+", " ", str(text))[:2000]  # uma linha por evento: impede forjar linhas falsas no log
+    with LOCK:
+        try:
+            if path.exists() and path.stat().st_size > LOG_MAX:
+                dados = path.read_bytes()[-LOG_MAX // 2:]
+                path.write_bytes(dados[dados.find(b"\n") + 1:])
+        except OSError:
+            pass
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%H:%M:%S')}] {kind}: {linha}\n")
 
 def public(b):
     """Nunca devolve o token completo (nem o do intermediador de pagamento) para o navegador."""
@@ -617,7 +704,17 @@ def build_app(bot):
             grouped[k] = grouped.get(k, 0) + 1
         return [(n, q, c) for (n, c), q in grouped.items() if c > 0]
 
+    async def pix_flood(message, user):
+        """No máximo 6 cobranças por cliente a cada 10 minutos (evita encher a conta do vendedor de cobranças)."""
+        if rl_take(("pix", bid, user.id), 6, 600):
+            track(await message.reply_text("Muitos pedidos em pouco tempo. Aguarde alguns minutos e tente de novo."))
+            log(bid, "WARN", f"{user.id} bloqueado por excesso de pedidos de Pix")
+            return True
+        return False
+
     async def create_and_send_pix(message, user, lines, customer):
+        if await pix_flood(message, user):
+            return
         total = sum(q * c for _, q, c in lines)
         summary = (f"Cliente: {customer['nome']} (@{user.username or 'sem username'}, ID {user.id})\n"
                    + ("" if customer.get("padrao") else f"E-mail: {customer['email']}\n") + "\n"
@@ -785,8 +882,10 @@ def build_app(bot):
         if not key_pix or not lines:
             await message.reply_text("Pagamento não configurado — fale com o vendedor.")
             return
+        if await pix_flood(message, user):
+            return
         total = sum(q * c for _, q, c in lines)
-        txid = "PED" + uuid.uuid4().hex[:10].upper()
+        txid ="PED" + uuid.uuid4().hex[:10].upper()
         code = pix_brcode(key_pix, payment.get("pix_name") or "", payment.get("pix_city") or "", total, txid)
         key = f"manual:{txid}"
         nome = getattr(user, "full_name", "") or "Cliente"
@@ -1096,7 +1195,11 @@ def build_app(bot):
         if data.startswith("manpaid|"):  # cliente avisa que pagou o Pix com valor exato
             key = data.split("|", 1)[1]
             await q.answer()
-            status = order_paid(key, bid)
+            row = order_row(key, bid)
+            if not row or row[1] != q.message.chat_id:  # pedido inexistente ou de outra conversa: não avisa ninguém
+                track(await q.message.reply_text("Pedido não encontrado."))
+                return
+            status = row[0]
             if status:
                 await q.message.reply_text("✅ Esse pagamento já foi confirmado.")
             elif key in pix_avisados:
@@ -1136,7 +1239,8 @@ def build_app(bot):
             order_id = data.split("|", 1)[1]
             await q.answer()
             await clean(ctx.bot, q.message.chat_id)  # some o "ainda não identificado" anterior
-            status = order_paid(order_id, bid)
+            row = order_row(order_id, bid)
+            status = row[0] if row and row[1] == q.message.chat_id else None  # só o dono do pedido consulta
             if status is None:
                 track(await q.message.reply_text("Pedido não encontrado."))
             elif status:
@@ -1276,9 +1380,220 @@ def start_worker(uid, bid):
         w.thread.start()
         log(bid, "SYS", "iniciando...")
 
-# ---------------- Auth ----------------
+# ---------------- Segurança da aplicação web ----------------
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import HTTPException
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "").strip() or os.urandom(24)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # o Render fica na frente: IP e https reais vêm nos cabeçalhos
+app.secret_key = os.environ.get("SECRET_KEY", "").strip() or os.urandom(32)
+IS_PROD = bool(os.environ.get("RENDER") or os.environ.get("FORCE_HTTPS"))
+app.config.update(
+    SESSION_COOKIE_NAME="tb_session",
+    SESSION_COOKIE_HTTPONLY=True,     # JavaScript não lê o cookie (roubo de sessão por XSS)
+    SESSION_COOKIE_SAMESITE="Lax",    # outros sites não mandam o cookie em POST (CSRF)
+    SESSION_COOKIE_SECURE=IS_PROD,    # só trafega em https
+    PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=7),
+    MAX_CONTENT_LENGTH=6 * 1024 * 1024,  # nenhuma requisição passa de 6 MB
+)
+SESSION_MAX_AGE = 7 * 24 * 3600
+JSON_MAX = 1024 * 1024
+
+# ---- limite de tentativas (em memória; o app roda em um processo só) ----
+_hits, _hits_lock = {}, threading.Lock()
+
+def _rl_prune(key, window, now):
+    q = _hits.get(key)
+    if q is None:
+        return None
+    while q and q[0] <= now - window:
+        q.popleft()
+    return q
+
+def rl_blocked(key, limit, window):
+    """Segundos que faltam para liberar, ou 0 se ainda não bateu o limite."""
+    now = time.time()
+    with _hits_lock:
+        q = _rl_prune(key, window, now)
+        return int(q[0] + window - now) + 1 if q and len(q) >= limit else 0
+
+def rl_hit(key):
+    with _hits_lock:
+        if len(_hits) > 20000:  # não deixa um ataque distribuído encher a memória
+            for k in [k for k, q in _hits.items() if not q or q[-1] < time.time() - 3600]:
+                _hits.pop(k, None)
+        _hits.setdefault(key, collections.deque(maxlen=1000)).append(time.time())
+
+def rl_take(key, limit, window):
+    wait = rl_blocked(key, limit, window)
+    if not wait:
+        rl_hit(key)
+    return wait
+
+def too_many(wait):
+    quando = f"{max(1, round(wait / 60))} min" if wait >= 60 else f"{wait} s"
+    return jsonify(ok=False, err=f"Muitas tentativas. Tente de novo em {quando}."), 429
+
+def client_ip():
+    return request.remote_addr or "?"
+
+def jbody():
+    """Corpo JSON da requisição, sempre um objeto. Qualquer outra coisa é recusada."""
+    d = request.get_json(silent=True)
+    if not isinstance(d, dict):
+        abort(make_response(jsonify(ok=False, err="Requisição inválida"), 400))
+    return d
+
+@app.before_request
+def security_gate():
+    if "uid" in session and time.time() - session.get("at", 0) > SESSION_MAX_AGE:
+        session.clear()  # sessão velha demais: exige login de novo
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        # CSRF: a requisição tem que vir do próprio painel. Outro site não consegue mandar este cabeçalho
+        # (o navegador barra) nem ter a mesma origem.
+        origem = request.headers.get("Origin") or request.headers.get("Referer") or ""
+        if origem and urlparse(origem).netloc != request.host:
+            return jsonify(ok=False, err="Origem não permitida"), 403
+        if request.headers.get("X-Requested-With") != "fetch":
+            return jsonify(ok=False, err="Requisição não permitida"), 403
+        if request.mimetype == "application/json" and (request.content_length or 0) > JSON_MAX:
+            return jsonify(ok=False, err="Dados grandes demais"), 413
+    if request.path.startswith("/api/"):
+        wait = rl_take(("api", session.get("uid") or client_ip()), 300, 60)
+        if wait:
+            return too_many(wait)
+
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; "
+       "frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'")
+
+@app.after_request
+def security_headers(resp):
+    h = resp.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")        # o navegador não "adivinha" tipos (imagem que vira script)
+    h.setdefault("X-Frame-Options", "DENY")                   # o painel não abre dentro de outro site (clickjacking)
+    h.setdefault("Referrer-Policy", "same-origin")
+    h.setdefault("Permissions-Policy", "geolocation=(), camera=(), microphone=(), payment=()")
+    h.setdefault("Content-Security-Policy", CSP)
+    h.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    if IS_PROD:
+        h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    if not request.path.startswith("/images/"):
+        h["Cache-Control"] = "no-store"                       # dados do painel não ficam em cache
+    h.pop("Server", None)
+    return resp
+
+@app.errorhandler(Exception)
+def on_error(e):
+    """Nunca devolve detalhes internos (rastros de erro, SQL) para quem está de fora."""
+    if isinstance(e, HTTPException):
+        if e.response is not None:
+            return e.response
+        if e.code and e.code < 400:
+            return e  # redirecionamentos seguem normalmente
+        msg = {404: "Não encontrado", 405: "Método não permitido", 413: "Arquivo grande demais (máximo de 5 MB)"}.get(e.code, "Requisição inválida")
+        return (jsonify(ok=False, err=msg), e.code) if request.path.startswith("/api/") or e.code == 413 else (msg, e.code)
+    app.logger.exception("erro interno")
+    return (jsonify(ok=False, err="Erro interno. Tente de novo."), 500) if request.path.startswith("/api/") else ("Erro interno", 500)
+
+# ---- senhas ----
+SENHAS_COMUNS = {"12345678", "123456789", "1234567890", "password", "senha123", "senha1234", "qwerty123", "abc12345",
+                 "11111111", "00000000", "87654321", "123123123", "password1", "iloveyou1", "brasil123", "mudar123"}
+DUMMY_HASH = generate_password_hash(secrets.token_hex(16))  # usado quando o e-mail não existe: tempo de resposta igual
+
+def password_problem(pw, email=""):
+    if not isinstance(pw, str) or len(pw) < 8:
+        return "A senha precisa ter pelo menos 8 caracteres."
+    if len(pw) > 200:
+        return "Senha longa demais."
+    if not re.search(r"[A-Za-zÀ-ÿ]", pw) or not re.search(r"\d", pw):
+        return "A senha precisa ter letras e números."
+    if pw.lower() in SENHAS_COMUNS or (email and pw.lower() == email.split("@")[0].lower()):
+        return "Essa senha é fácil demais de adivinhar. Escolha outra."
+    return ""
+
+def start_session(uid):
+    session.clear()  # sessão nova a cada login (impede "fixação de sessão")
+    session.permanent = True
+    session["uid"], session["at"] = uid, time.time()
+
+# ---- verificação em duas etapas (TOTP, RFC 6238: Google Authenticator, Authy, etc.) ----
+def totp_at(secret_b32, t):
+    key = base64.b32decode(secret_b32.upper() + "=" * (-len(secret_b32) % 8))
+    mac = hmac.new(key, struct.pack(">Q", int(t // 30)), "sha1").digest()
+    o = mac[-1] & 15
+    return f"{(struct.unpack('>I', mac[o:o + 4])[0] & 0x7fffffff) % 1000000:06d}"
+
+_totp_used = {}  # uid -> último intervalo aceito (o mesmo código não vale duas vezes)
+
+def totp_ok(secret, code, uid=None):
+    code = re.sub(r"\D", "", str(code or ""))
+    if len(code) != 6 or not secret:
+        return False
+    now = time.time()
+    for w in (-1, 0, 1):  # tolera 30 s de diferença de relógio
+        step = int((now + w * 30) // 30)
+        if hmac.compare_digest(totp_at(secret, now + w * 30), code):
+            if uid is not None:
+                if _totp_used.get(uid, 0) >= step:
+                    return False
+                _totp_used[uid] = step
+            return True
+    return False
+
+def sec_get(uid):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT totp_secret, backup_codes FROM account_security WHERE account_id=%s", (uid,))
+        row = cur.fetchone()
+    if not row:
+        return "", []
+    codes = row[1]
+    if isinstance(codes, str):
+        try:
+            codes = json.loads(codes or "[]")
+        except ValueError:
+            codes = []
+    return dec(row[0] or ""), list(codes or [])
+
+def sec_set(uid, secret, codes):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("""INSERT INTO account_security (account_id, totp_secret, backup_codes) VALUES (%s,%s,%s)
+                       ON CONFLICT (account_id) DO UPDATE SET totp_secret=EXCLUDED.totp_secret, backup_codes=EXCLUDED.backup_codes""",
+                    (uid, enc(secret) if secret else None, json.dumps(codes)))
+        conn.commit()
+
+def _code_hash(code):
+    return hashlib.sha256(re.sub(r"[^a-z0-9]", "", str(code or "").lower()).encode()).hexdigest()
+
+def second_factor_ok(uid, code):
+    """Aceita o código do aplicativo ou um código reserva (cada reserva vale uma vez)."""
+    secret, codes = sec_get(uid)
+    if totp_ok(secret, code, uid):
+        return True
+    h = _code_hash(code)
+    if len(re.sub(r"[^a-z0-9]", "", str(code or "").lower())) == 8 and h in codes:
+        codes.remove(h)
+        sec_set(uid, secret, codes)
+        return True
+    return False
+
+# ---- e-mail (confirmação de cadastro; só funciona com SMTP_HOST e SMTP_FROM configurados) ----
+def smtp_ready():
+    return bool(os.environ.get("SMTP_HOST") and os.environ.get("SMTP_FROM"))
+
+def send_mail(to, subject, text):
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = os.environ["SMTP_FROM"], to, subject
+    msg.set_content(text)
+    host, port = os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT") or 587)
+    ctx = ssl.create_default_context()
+    smtp = smtplib.SMTP_SSL(host, port, timeout=15, context=ctx) if port == 465 else smtplib.SMTP(host, port, timeout=15)
+    with smtp:
+        if port != 465:
+            smtp.starttls(context=ctx)
+        if os.environ.get("SMTP_USER"):
+            smtp.login(os.environ["SMTP_USER"], os.environ.get("SMTP_PASS", ""))
+        smtp.send_message(msg)
 
 def login_required(f):
     @wraps(f)
@@ -1296,40 +1611,206 @@ def login_page():
         return redirect(url_for("index"))
     return render_template("login.html")
 
-@app.route("/api/signup", methods=["POST"])
-def api_signup():
-    d = request.get_json(force=True)
-    email = (d.get("email") or "").strip().lower()
-    pw = d.get("password") or ""
-    if "@" not in email or len(pw) < 6:
-        return jsonify(ok=False, err="E-mail inválido ou senha muito curta (mín. 6 caracteres)"), 400
+def _str(d, key, limit=320):
+    v = d.get(key)
+    return v.strip()[:limit] if isinstance(v, str) else ""
+
+def create_account(email, password_hash):
+    """Cria a conta e devolve o id, ou None se o e-mail já existe."""
     try:
         with db() as conn, conn.cursor() as cur:
-            cur.execute("INSERT INTO accounts (email, password_hash) VALUES (%s,%s) RETURNING id",
-                        (email, generate_password_hash(pw)))
+            cur.execute("INSERT INTO accounts (email, password_hash) VALUES (%s,%s) RETURNING id", (email, password_hash))
             uid = cur.fetchone()[0]
             conn.commit()
+            return uid
     except psycopg2.errors.UniqueViolation:
-        return jsonify(ok=False, err="Esse e-mail já tem conta"), 400
-    session["uid"] = uid
+        return None
+
+@app.route("/api/signup", methods=["POST"])
+def api_signup():
+    d = jbody()
+    email, pw = _str(d, "email").lower(), d.get("password")
+    wait = rl_take(("signup", client_ip()), 6, 3600)  # no máximo 6 cadastros por hora por endereço
+    if wait:
+        return too_many(wait)
+    if len(email) > 254 or not email_ok(email):
+        return jsonify(ok=False, err="E-mail inválido"), 400
+    problema = password_problem(pw, email)
+    if problema:
+        return jsonify(ok=False, err=problema), 400
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM accounts WHERE email=%s", (email,))
+        existe = cur.fetchone()
+    if not smtp_ready():  # sem servidor de e-mail configurado: cria direto (protegido pelo limite acima)
+        if existe:
+            return jsonify(ok=False, err="Esse e-mail já tem conta"), 400
+        uid = create_account(email, generate_password_hash(pw))
+        if uid is None:
+            return jsonify(ok=False, err="Esse e-mail já tem conta"), 400
+        start_session(uid)
+        return jsonify(ok=True)
+    # com e-mail configurado: a conta só nasce depois do código. A resposta é a mesma existindo ou não a conta,
+    # para ninguém descobrir quais e-mails estão cadastrados.
+    if not existe:
+        code = f"{secrets.randbelow(1000000):06d}"
+        with db() as conn, conn.cursor() as cur:
+            cur.execute("""INSERT INTO signup_pending (email, password_hash, code_hash, attempts, expires) VALUES (%s,%s,%s,0,%s)
+                           ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash,
+                           code_hash=EXCLUDED.code_hash, attempts=0, expires=EXCLUDED.expires""",
+                        (email, generate_password_hash(pw), _code_hash(code + email), time.time() + 600))
+            conn.commit()
+        try:
+            send_mail(email, "Seu código do TeleBot Builder",
+                      f"Seu código de confirmação é {code}\n\nEle vale por 10 minutos. Se não foi você, ignore este e-mail.")
+        except Exception:
+            app.logger.exception("falha ao enviar e-mail")
+            return jsonify(ok=False, err="Não consegui enviar o e-mail de confirmação. Tente de novo em instantes."), 502
+    return jsonify(ok=True, need_code=True)
+
+@app.route("/api/signup/verify", methods=["POST"])
+def api_signup_verify():
+    d = jbody()
+    email, code = _str(d, "email").lower(), re.sub(r"\D", "", _str(d, "code", 12))
+    wait = rl_take(("verify", client_ip()), 20, 600)
+    if wait:
+        return too_many(wait)
+    erro = (jsonify(ok=False, err="Código incorreto ou vencido. Peça um novo código."), 400)
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT password_hash, code_hash, attempts, expires FROM signup_pending WHERE email=%s", (email,))
+        row = cur.fetchone()
+        if not row or row[3] < time.time() or row[2] >= 5:
+            return erro
+        if not hmac.compare_digest(row[1], _code_hash(code + email)):
+            cur.execute("UPDATE signup_pending SET attempts=attempts+1 WHERE email=%s", (email,))  # 5 erros queimam o código
+            conn.commit()
+            return erro
+        cur.execute("DELETE FROM signup_pending WHERE email=%s", (email,))
+        conn.commit()
+    uid = create_account(email, row[0])
+    if uid is None:
+        return erro
+    start_session(uid)
     return jsonify(ok=True)
 
 @app.route("/api/login", methods=["POST"])
 def api_login():
-    d = request.get_json(force=True)
-    email = (d.get("email") or "").strip().lower()
-    pw = d.get("password") or ""
+    d = jbody()
+    email, pw, ip = _str(d, "email").lower(), d.get("password"), client_ip()
+    # força bruta: 8 erros por conta ou 40 por endereço em 15 minutos bloqueiam novas tentativas
+    wait = rl_blocked(("fail", email), 8, 900) or rl_blocked(("failip", ip), 40, 900)
+    if wait:
+        return too_many(wait)
     with db() as conn, conn.cursor() as cur:
         cur.execute("SELECT id, password_hash FROM accounts WHERE email=%s", (email,))
         row = cur.fetchone()
-    if not row or not check_password_hash(row[1], pw):
+    ok = check_password_hash(row[1] if row else DUMMY_HASH, pw if isinstance(pw, str) else "") and bool(row)
+    if not ok:
+        rl_hit(("fail", email)); rl_hit(("failip", ip))
         return jsonify(ok=False, err="E-mail ou senha incorretos"), 400
-    session["uid"] = row[0]
+    if sec_get(row[0])[0]:  # conta com verificação em duas etapas: a senha sozinha não entra
+        session.clear()
+        session["p2"], session["p2_at"] = row[0], time.time()
+        return jsonify(ok=True, need_2fa=True)
+    start_session(row[0])
+    return jsonify(ok=True)
+
+@app.route("/api/login/2fa", methods=["POST"])
+def api_login_2fa():
+    d = jbody()
+    uid = session.get("p2")
+    if not uid or time.time() - session.get("p2_at", 0) > 300:
+        session.clear()
+        return jsonify(ok=False, err="O tempo acabou. Entre com e-mail e senha de novo."), 400
+    wait = rl_blocked(("2fa", uid), 6, 900)
+    if wait:
+        return too_many(wait)
+    if not second_factor_ok(uid, _str(d, "code", 20)):
+        rl_hit(("2fa", uid))
+        return jsonify(ok=False, err="Código incorreto"), 400
+    start_session(uid)
     return jsonify(ok=True)
 
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
     session.clear()
+    return jsonify(ok=True)
+
+# ---- conta: senha e verificação em duas etapas ----
+def _account_row(uid):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT email, password_hash FROM accounts WHERE id=%s", (uid,))
+        return cur.fetchone()
+
+@app.route("/api/account")
+@login_required
+def api_account():
+    row = _account_row(session["uid"])
+    if not row:
+        session.clear()
+        return jsonify(ok=False, err="Sessão expirada, faça login de novo"), 401
+    secret, codes = sec_get(session["uid"])
+    return jsonify(ok=True, email=row[0], twofa=bool(secret), backup_left=len(codes),
+                   encrypted=bool(_fernet), email_check=smtp_ready())
+
+@app.route("/api/account/password", methods=["POST"])
+@login_required
+def api_account_password():
+    d, uid = jbody(), session["uid"]
+    wait = rl_take(("sens", uid), 10, 600)
+    if wait:
+        return too_many(wait)
+    row = _account_row(uid)
+    atual, nova = d.get("current"), d.get("new")
+    if not row or not check_password_hash(row[1], atual if isinstance(atual, str) else ""):
+        return jsonify(ok=False, err="Senha atual incorreta"), 400
+    problema = password_problem(nova, row[0])
+    if problema:
+        return jsonify(ok=False, err=problema), 400
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE accounts SET password_hash=%s WHERE id=%s", (generate_password_hash(nova), uid))
+        conn.commit()
+    start_session(uid)
+    return jsonify(ok=True)
+
+@app.route("/api/2fa/setup", methods=["POST"])
+@login_required
+def api_2fa_setup():
+    uid = session["uid"]
+    row = _account_row(uid)
+    if sec_get(uid)[0]:
+        return jsonify(ok=False, err="A verificação em duas etapas já está ligada"), 400
+    secret = base64.b32encode(secrets.token_bytes(20)).decode()
+    session["totp_setup"] = secret
+    uri = f"otpauth://totp/{quote('TeleBot Builder')}:{quote(row[0])}?secret={secret}&issuer={quote('TeleBot Builder')}"
+    return jsonify(ok=True, secret=secret, qr="data:image/png;base64," + base64.b64encode(qr_png(uri)).decode())
+
+@app.route("/api/2fa/enable", methods=["POST"])
+@login_required
+def api_2fa_enable():
+    d, uid = jbody(), session["uid"]
+    wait = rl_take(("sens", uid), 10, 600)
+    if wait:
+        return too_many(wait)
+    secret = session.get("totp_setup")
+    if not secret or not totp_ok(secret, _str(d, "code", 12)):
+        return jsonify(ok=False, err="Código incorreto. Confira o relógio do celular e tente de novo."), 400
+    reservas = [secrets.token_hex(4) for _ in range(8)]
+    sec_set(uid, secret, [_code_hash(c) for c in reservas])
+    session.pop("totp_setup", None)
+    return jsonify(ok=True, backup_codes=[c[:4] + "-" + c[4:] for c in reservas])
+
+@app.route("/api/2fa/disable", methods=["POST"])
+@login_required
+def api_2fa_disable():
+    d, uid = jbody(), session["uid"]
+    wait = rl_take(("sens", uid), 10, 600)
+    if wait:
+        return too_many(wait)
+    row = _account_row(uid)
+    senha = d.get("password")
+    if not row or not check_password_hash(row[1], senha if isinstance(senha, str) else "") or not second_factor_ok(uid, _str(d, "code", 20)):
+        return jsonify(ok=False, err="Senha ou código incorreto"), 400
+    sec_set(uid, None, [])
     return jsonify(ok=True)
 
 # ---------------- API ----------------
@@ -1340,28 +1821,99 @@ def index():
 
 @app.route("/images/<path:filename>")
 def api_image(filename):
-    safe = re.sub(r"[^\w.-]", "", filename)
-    img = get_image(safe)
-    if not img:
+    if not IMG_NAME.fullmatch(filename):  # só nomes gerados pelo próprio painel (nada de ../ ou caminhos)
+        return jsonify(ok=False, err="Imagem não encontrada"), 404
+    img = get_image(filename)
+    if not img or img[0] not in IMG_MIME.values():
         return jsonify(ok=False, err="Imagem não encontrada"), 404
     ctype, data = img
-    return Response(data, mimetype=ctype)
+    resp = Response(data, mimetype=ctype)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    resp.headers["Content-Disposition"] = "inline"
+    return resp
+
+IMG_NAME = re.compile(r"[0-9a-f]{32}\.(jpg|jpeg|png|webp|gif)")
+IMG_MAX = 5 * 1024 * 1024
+
+def image_kind(data):
+    """Extensão real do arquivo, pelos primeiros bytes (a extensão do nome pode mentir)."""
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return ""
 
 @app.route("/api/upload_image", methods=["POST"])
 @login_required
 def api_upload_image():
+    wait = rl_take(("upload", session["uid"]), 40, 600)  # 40 imagens a cada 10 minutos por conta
+    if wait:
+        return too_many(wait)
     f = request.files.get("image")
     if not f or not f.filename:
         return jsonify(ok=False, err="Nenhuma imagem enviada"), 400
-    ext = os.path.splitext(f.filename)[1].lower()
-    if ext not in IMG_EXTS:
-        return jsonify(ok=False, err="Formato de imagem inválido (use jpg, png, webp ou gif)"), 400
+    data = f.read(IMG_MAX + 1)
+    if len(data) > IMG_MAX:
+        return jsonify(ok=False, err="Imagem grande demais (máximo de 5 MB)"), 413
+    ext = image_kind(data)
+    if not ext:
+        return jsonify(ok=False, err="Esse arquivo não é uma imagem válida (use jpg, png, webp ou gif)"), 400
     fname = uuid.uuid4().hex + ext
     try:
-        save_image(fname, f.read())
-    except Exception as e:
-        return jsonify(ok=False, err=f"Erro ao salvar no banco: {e}"), 500
+        save_image(fname, data)
+    except Exception:
+        app.logger.exception("falha ao salvar imagem")
+        return jsonify(ok=False, err="Não consegui salvar a imagem. Tente de novo."), 500
     return jsonify(ok=True, filename=fname)
+
+# ---- limpeza do que o navegador envia (tipos, tamanhos e nomes de arquivo) ----
+def _s(v, n):
+    if isinstance(v, str):
+        return v[:n]
+    return str(v)[:n] if isinstance(v, (int, float)) and not isinstance(v, bool) else ""
+
+def _img(v):
+    return v if isinstance(v, str) and IMG_NAME.fullmatch(v) else ""
+
+def _rows(v, spec, max_items):
+    out = []
+    for x in (v if isinstance(v, list) else [])[:max_items]:
+        if isinstance(x, dict):
+            out.append({k: (_img(x.get(k)) if n == "img" else _s(x.get(k), n)) for k, n in spec.items()})
+    return out
+
+PAY_FIELDS = {"type": 10, "pix_key": 140, "pix_name": 60, "pix_city": 40, "instructions": 1000, "gateway": 20,
+              "api_token": 400, "api_env": 10, "admin_chat_id": 20, "default_email": 254, "default_cpf": 20,
+              "pagbank_token": 400, "pagbank_env": 10}
+
+def sanitize_bot(b):
+    b["name"] = _s(b.get("name"), 60).strip() or "Meu bot"
+    b["enabled"], b["admin_only"] = bool(b.get("enabled")), bool(b.get("admin_only"))
+    b["auto_clean"] = b.get("auto_clean") is not False
+    b["commands"] = _rows(b.get("commands"), {"cmd": 32, "text": 4000, "action": 20, "image": "img", "url": 1000}, 60)
+    b["products"] = _rows(b.get("products"), {"name": 64, "price": 30, "description": 900, "image": "img", "category": 60}, 300)
+    b["auto_replies"] = _rows(b.get("auto_replies"), {"match": 200, "mode": 10, "reply": 4000}, 100)
+    bw = b.get("banned_words")
+    b["banned_words"] = [w.strip().lower()[:60] for w in (bw if isinstance(bw, list) else []) if isinstance(w, str) and w.strip()][:300]
+    wl = b.get("whitelist")
+    b["whitelist"] = [int(x) for x in (wl if isinstance(wl, list) else []) if str(x).lstrip("-").isdigit() and len(str(x)) < 20][:200]
+    rk = b.get("reply_keyboard")
+    b["reply_keyboard"] = [[c[:40] for c in row if isinstance(c, str)][:4] for row in (rk if isinstance(rk, list) else []) if isinstance(row, list)][:8]
+    ik = b.get("inline_keyboards")
+    b["inline_keyboards"] = [k for k in (ik if isinstance(ik, list) else []) if isinstance(k, dict) and isinstance(k.get("buttons"), list)
+                             and all(isinstance(r, list) and all(isinstance(x, dict) and isinstance(x.get("text"), str)
+                                     and isinstance(x.get("callback"), str) for x in r) for r in k["buttons"])][:20]
+    p = b.get("payment") if isinstance(b.get("payment"), dict) else {}
+    pay = {k: _s(p.get(k), n) for k, n in PAY_FIELDS.items() if k in p}
+    pay["type"] = pay.get("type") if pay.get("type") in ("api", "pix", "pixqr") else ""
+    pay["qr_image"] = _img(p.get("qr_image"))
+    pay["ask_customer"] = p.get("ask_customer") is not False
+    b["payment"] = pay
+    return b
 
 @app.route("/api/bots")
 @login_required
@@ -1372,18 +1924,23 @@ def api_bots():
 @login_required
 def api_new():
     uid = session["uid"]
-    d = request.get_json(force=True)
-    token = (d.get("token") or "").strip()
-    name = (d.get("name") or "MeuBot").strip()
+    d = jbody()
+    token = _str(d, "token", 120)
+    name = _str(d, "name", 60) or "Meu bot"
     if not re.fullmatch(r"\d+:[\w-]{20,}", token):
         return jsonify(ok=False, err="Formato de token inválido (esperado 123456:ABC...)"), 400
+    wait = rl_take(("newbot", uid), 10, 3600)
+    if wait:
+        return too_many(wait)
     bots = load_bots(uid)
+    if len(bots) >= 30:
+        return jsonify(ok=False, err="Limite de 30 bots por conta"), 400
     if any(b["token"] == token for b in bots):
         return jsonify(ok=False, err="Token já cadastrado"), 400
     ok, info = check_token(token)
     if not ok:
         return jsonify(ok=False, err=info), 400
-    bid = "bot_" + uuid.uuid4().hex[:8]
+    bid = "bot_" + secrets.token_hex(8)  # identificador longo e aleatório: não dá para adivinhar o de outra conta
     bots.append({
         "id": bid, "name": name, "token": token, "enabled": True,
         "commands": [{"cmd": "start", "text": f"Olá! Eu sou o {name}. Como posso ajudar?"}],
@@ -1400,7 +1957,9 @@ def api_new():
 @login_required
 def api_update(bid):
     uid = session["uid"]
-    body = request.get_json(force=True)
+    body = jbody()
+    if "payment" in body and not isinstance(body["payment"], dict):
+        body = {**body, "payment": {}}
     with LOCK:
         bots = load_bots(uid)
         b = next((x for x in bots if x["id"] == bid), None)
@@ -1445,12 +2004,13 @@ def api_update(bid):
         for k in EDITABLE:
             if k in body:
                 b[k] = body[k]
-        b["whitelist"] = [int(x) for x in b.get("whitelist", []) if str(x).lstrip("-").isdigit()]
+        sanitize_bot(b)  # tipos e tamanhos conferidos: nada do que vem do navegador é gravado sem passar por aqui
         # botões do menu: só texto não vazio, função conhecida, no máximo 24
         b["buttons"] = [{"text": str(x.get("text") or "").strip()[:40],
                          "action": x.get("action") if x.get("action") in BUTTON_ACTIONS else "text",
                          "value": str(x.get("value") or "").strip()[:1000]}
-                        for x in (b.get("buttons") or []) if isinstance(x, dict) and str(x.get("text") or "").strip()][:24]
+                        for x in (b["buttons"] if isinstance(b.get("buttons"), list) else [])
+                        if isinstance(x, dict) and str(x.get("text") or "").strip()][:24]
         try:
             b["buttons_per_row"] = min(3, max(1, int(b.get("buttons_per_row") or 2)))
         except (TypeError, ValueError):
@@ -1463,7 +2023,7 @@ def api_update(bid):
 @login_required
 def api_payment_test(bid):
     """Botão 'Testar token' do painel: confere o token digitado (ou o salvo) sem salvar nada."""
-    d = request.get_json(force=True) or {}
+    d = jbody()
     b = next((x for x in load_bots(session["uid"]) if x["id"] == bid), None)
     if not b:
         return jsonify(ok=False, err="Bot não encontrado"), 404
@@ -1481,7 +2041,7 @@ def api_payment_test(bid):
 def api_payment_trial(bid):
     """Aba 'Testar pagamento': gera um Pix de R$ 1,00 com a configuração SALVA e consulta se foi pago.
     Não cria pedido no bot (nada é enviado para clientes)."""
-    d = request.get_json(force=True) or {}
+    d = jbody()
     b = next((x for x in load_bots(session["uid"]) if x["id"] == bid), None)
     if not b:
         return jsonify(ok=False, err="Bot não encontrado"), 404
@@ -1529,10 +2089,12 @@ def api_payment_trial(bid):
 @login_required
 def api_delete(bid):
     uid = session["uid"]
+    bots = load_bots(uid)
+    if not any(b["id"] == bid for b in bots):  # só o dono mexe: antes disso nada é parado nem apagado
+        return jsonify(ok=False, err="Bot não encontrado"), 404
     stop_worker(bid)
-    bots = [b for b in load_bots(uid) if b["id"] != bid]
-    save_bots(uid, bots)
-    (LOG_DIR / f"{bid}.log").unlink(missing_ok=True)
+    save_bots(uid, [b for b in bots if b["id"] != bid])
+    (LOG_DIR / (re.sub(r"[^\w-]", "", bid) + ".log")).unlink(missing_ok=True)
     return jsonify(ok=True)
 
 @app.route("/api/bots/<bid>/log")
@@ -1558,6 +2120,11 @@ def api_log_clear(bid):
 
 # ---------------- Inicialização (roda tanto no "python app.py" quanto sob gunicorn) ----------------
 init_db()
+purge_old_data()
+if IS_PROD and not os.environ.get("SECRET_KEY", "").strip():
+    app.logger.warning("SECRET_KEY não definida: as sessões caem a cada reinício. Defina SECRET_KEY no ambiente.")
+if IS_PROD and not _fernet:
+    app.logger.warning("DATA_KEY não definida: tokens e dados de pedidos ficam sem criptografia no banco.")
 for _uid, _bots in all_accounts():
     for _b in _bots:
         if _b.get("enabled"):

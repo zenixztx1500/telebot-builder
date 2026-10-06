@@ -39,40 +39,66 @@ button:disabled{opacity:.6;cursor:default}
  <h1 id="title">Entrar na sua conta</h1>
  <p class="sub" id="sub">Gerencie seus bots do Telegram.</p>
  <div class="err" id="err" role="alert"></div>
- <div class="field"><label for="email">E-mail</label><input id="email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required></div>
- <div class="field"><label for="pw">Senha</label><input id="pw" type="password" autocomplete="current-password" placeholder="Mínimo de 6 caracteres" required></div>
+ <div id="creds">
+  <div class="field"><label for="email">E-mail</label><input id="email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required></div>
+  <div class="field"><label for="pw">Senha</label><input id="pw" type="password" autocomplete="current-password" placeholder="Sua senha" required></div>
+ </div>
+ <div id="codebox" style="display:none">
+  <div class="field"><label for="code" id="codelabel">Código</label><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="000000"></div>
+ </div>
  <button type="submit" id="btn">Entrar</button>
  <div class="switch" id="switchLine">Não tem conta? <a href="#" onclick="toggle();return false">Criar conta</a></div>
 </form>
 <script>
 const $=id=>document.getElementById(id);
-let mode='login';
-function toggle(){
- mode = mode==='login' ? 'signup' : 'login';
- const login = mode==='login';
- $('title').textContent = login ? 'Entrar na sua conta' : 'Criar sua conta';
- $('sub').textContent = login ? 'Gerencie seus bots do Telegram.' : 'Leva menos de um minuto.';
- $('btn').textContent = login ? 'Entrar' : 'Criar conta';
- $('pw').autocomplete = login ? 'current-password' : 'new-password';
+let mode='login';   // 'login' ou 'signup'
+let step='creds';   // 'creds' (e-mail e senha), '2fa' (código do aplicativo) ou 'mail' (código enviado por e-mail)
+function paint(){
+ const login = mode==='login', code = step!=='creds';
+ $('creds').style.display = code ? 'none' : '';
+ $('codebox').style.display = code ? '' : 'none';
  $('err').style.display='none';
- $('switchLine').innerHTML = login
-  ? 'Não tem conta? <a href="#" onclick="toggle();return false">Criar conta</a>'
+ if(step==='2fa'){
+  $('title').textContent='Verificação em duas etapas';
+  $('sub').textContent='Digite o código de 6 dígitos do aplicativo no seu celular, ou um código reserva.';
+  $('codelabel').textContent='Código'; $('btn').textContent='Confirmar';
+ }else if(step==='mail'){
+  $('title').textContent='Confirme seu e-mail';
+  $('sub').textContent='Enviamos um código de 6 dígitos para '+$('email').value.trim()+'. Ele vale por 10 minutos.';
+  $('codelabel').textContent='Código recebido'; $('btn').textContent='Confirmar e criar conta';
+ }else{
+  $('title').textContent = login ? 'Entrar na sua conta' : 'Criar sua conta';
+  $('sub').textContent = login ? 'Gerencie seus bots do Telegram.' : 'Use uma senha com pelo menos 8 caracteres, letras e números.';
+  $('btn').textContent = login ? 'Entrar' : 'Criar conta';
+  $('pw').autocomplete = login ? 'current-password' : 'new-password';
+ }
+ $('switchLine').innerHTML = code ? '<a href="#" onclick="back();return false">Voltar</a>'
+  : login ? 'Não tem conta? <a href="#" onclick="toggle();return false">Criar conta</a>'
   : 'Já tem conta? <a href="#" onclick="toggle();return false">Entrar</a>';
+ if(code){$('code').value='';$('code').focus()}
 }
+function toggle(){mode = mode==='login' ? 'signup' : 'login'; step='creds'; paint()}
+function back(){step='creds'; paint()}
 function fail(msg){const e=$('err');e.textContent=msg;e.style.display='block'}
+// X-Requested-With: o servidor só aceita requisições que vêm desta página (proteção contra CSRF)
+const post=(url,body)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'fetch'},body:JSON.stringify(body)}).then(r=>r.json());
 $('form').addEventListener('submit', async ev=>{
  ev.preventDefault();
- const email=$('email').value.trim(), pw=$('pw').value, btn=$('btn');
+ const email=$('email').value.trim(), pw=$('pw').value, code=$('code').value.trim(), btn=$('btn');
  $('err').style.display='none';
- if(!email||!pw){fail('Preencha o e-mail e a senha.');return}
- const label=btn.textContent; btn.disabled=true; btn.textContent = mode==='login' ? 'Entrando...' : 'Criando conta...';
+ if(step==='creds'&&(!email||!pw)){fail('Preencha o e-mail e a senha.');return}
+ if(step!=='creds'&&!code){fail('Digite o código.');return}
+ const label=btn.textContent; btn.disabled=true; btn.textContent='Aguarde...';
  try{
-  const r = await fetch(mode==='login' ? '/api/login' : '/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
-  const j = await r.json();
-  if(j.ok){ window.location.href='/'; return }
-  fail(j.err||'Não foi possível entrar. Tente de novo.');
- }catch(e){ fail('Sem conexão com o servidor. Tente de novo.') }
- btn.disabled=false; btn.textContent=label;
+  const j = step==='2fa' ? await post('/api/login/2fa',{code})
+   : step==='mail' ? await post('/api/signup/verify',{email,code})
+   : await post(mode==='login' ? '/api/login' : '/api/signup',{email,password:pw});
+  btn.disabled=false; btn.textContent=label;
+  if(j.need_2fa){step='2fa';paint();return}
+  if(j.need_code){step='mail';paint();return}
+  if(j.ok){window.location.href='/';return}
+  fail(j.err||'Não foi possível continuar. Tente de novo.');
+ }catch(e){btn.disabled=false; btn.textContent=label; fail('Sem conexão com o servidor. Tente de novo.')}
 });
 </script>
 </body></html>

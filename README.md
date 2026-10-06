@@ -35,6 +35,21 @@ Na aba **Pagamento**, escolha "Atendimento automático (API de pagamento)" e o i
 
 A aba **🧪 Testar pagamento** gera um Pix de R$ 1,00 com a configuração salva, mostra o QR Code no próprio painel e confere sozinha se ele foi pago — sem passar pelo Telegram.
 
+## Segurança
+Proteções ligadas sempre: limite de tentativas de login (8 erros por conta / 40 por endereço em 15 min), limite de cadastros, uploads e requisições, proteção contra CSRF, cookie de sessão HttpOnly/SameSite/Secure, cabeçalhos de segurança (CSP, anti-clickjacking, nosniff, HSTS), senhas com hash e regra mínima (8 caracteres, letras e números), upload conferido pelo conteúdo real (máx. 5 MB), cada conta só acessa os próprios bots, erros internos sem detalhes.
+
+Em **Conta** (rodapé da lateral) cada usuário pode trocar a senha e ligar a **verificação em duas etapas** (código do Google Authenticator ou similar, com 8 códigos reserva).
+
+Variáveis de ambiente (defina no Render → Environment):
+
+| Variável | Para quê |
+|---|---|
+| `SECRET_KEY` | Chave das sessões. Sem ela, todo mundo é deslogado a cada reinício. Use um texto longo e aleatório. |
+| `DATA_KEY` | Liga a criptografia no banco: tokens (Telegram e intermediador), segredo do 2FA e nome/e-mail dos clientes nos pedidos. **Guarde uma cópia: se ela for trocada ou perdida, o que já foi cifrado não pode mais ser lido** (será preciso recadastrar os tokens). |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Liga a confirmação de e-mail no cadastro (código de 6 dígitos, 10 minutos). Sem elas, o cadastro não pede código. |
+
+Pedidos com mais de 90 dias são apagados sozinhos. Ataques de negação de serviço em grande escala (milhões de requisições) precisam de proteção na frente do servidor, como o Cloudflare; o código limita o que cada endereço e cada conta consegue fazer.
+
 ## Botões do menu
 Na aba **Botões** você monta o menu que fica embaixo do campo de mensagem no Telegram. Cada botão tem uma função pronta: abrir catálogo, ver carrinho, finalizar compra, esvaziar carrinho, enviar mensagem, abrir link, falar com o vendedor, pedir contato, pedir localização ou executar um comando da aba Comandos.
 Escolha quantos botões por linha (1 a 3) e veja a pré-visualização. Sem botões cadastrados, o bot usa o menu padrão (Produtos, Carrinho, Finalizar compra). Os clientes veem o menu novo depois de enviar /start de novo.
