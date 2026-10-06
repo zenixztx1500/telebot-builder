@@ -2,246 +2,449 @@
 <html lang="pt-BR"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TeleBot Builder</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('tb-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
- --bg:#0A0E14;--card:#121821;--card2:#1A212C;--line:#232C3A;
- --txt:#EAF0F7;--mut:#8B98AC;--acc:#2FBF9F;--acc-ink:#06120F;--ok:#2FBF9F;--bad:#E5546B;
+ --font:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+ --bg:#f6f7f9;--surface:#fff;--surface-2:#f9fafb;--hover:#f2f4f7;--border:#e4e7ec;--border-2:#d0d5dd;
+ --text:#101828;--text-2:#344054;--muted:#667085;--faint:#98a2b3;
+ --accent:#155eef;--accent-hover:#004eeb;--accent-soft:#eff4ff;--ring:rgba(21,94,239,.2);
+ --ok:#067647;--ok-bg:#ecfdf3;--ok-bd:#abefc6;--warn:#b54708;--warn-bg:#fffaeb;--warn-bd:#fedf89;
+ --bad:#b42318;--bad-bg:#fef3f2;--bad-bd:#fecdca;--info:#175cd3;--info-bg:#eff8ff;--info-bd:#b2ddff;
+ --shadow-sm:0 1px 2px rgba(16,24,40,.05);--shadow-lg:0 20px 40px -12px rgba(16,24,40,.22),0 4px 10px -4px rgba(16,24,40,.08);
+ --r:8px;--r-lg:12px;
+}
+[data-theme=dark]{
+ --bg:#0b0d10;--surface:#121418;--surface-2:#16191e;--hover:#1b1f25;--border:#22262d;--border-2:#343a44;
+ --text:#f2f4f7;--text-2:#d0d5dd;--muted:#98a2b3;--faint:#667085;
+ --accent:#3b7cff;--accent-hover:#5a91ff;--accent-soft:rgba(59,124,255,.13);--ring:rgba(59,124,255,.32);
+ --ok:#47cd89;--ok-bg:rgba(71,205,137,.1);--ok-bd:rgba(71,205,137,.28);--warn:#fdb022;--warn-bg:rgba(253,176,34,.1);--warn-bd:rgba(253,176,34,.28);
+ --bad:#f97066;--bad-bg:rgba(249,112,102,.1);--bad-bd:rgba(249,112,102,.3);--info:#84caff;--info-bg:rgba(132,202,255,.09);--info-bd:rgba(132,202,255,.25);
+ --shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow-lg:0 24px 48px -12px rgba(0,0,0,.7);
+ color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;font:14.5px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased}
-header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--card)}
-.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px}
-.brand-mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--acc),#1c8f76);display:flex;align-items:center;justify-content:center;font-size:13px}
-h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 6px;font-weight:600}
-button{background:var(--acc);color:var(--acc-ink);border:0;padding:9px 14px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13.5px;font-family:inherit}
-button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
-button.ghost:hover{background:var(--card2)}
-button.danger{background:transparent;border:1px solid rgba(229,84,107,.4);color:var(--bad)}
-button.danger:hover{background:rgba(229,84,107,.08)}
-.shell{display:grid;grid-template-columns:250px 1fr;min-height:calc(100vh - 55px)}
-aside{background:var(--card);border-right:1px solid var(--line);padding:14px;overflow-y:auto}
-.content{padding:22px;max-width:960px}
-label{display:block;font-size:12.5px;color:var(--mut);margin:10px 0 4px}
-input,textarea,select{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font:inherit;font-size:13.5px}
-input::placeholder,textarea::placeholder{color:#57677C}
-input[type=checkbox]{width:auto}
-.row{display:flex;gap:8px;margin-bottom:8px}.row>*{flex:1}.row>button{flex:0 0 auto}
-.tag{display:inline-flex;align-items:center;background:var(--card2);border:1px solid var(--line);border-radius:20px;padding:4px 11px;margin:3px 4px 3px 0;font-size:12.5px;cursor:pointer;color:var(--mut)}
-.tag:hover{color:var(--bad);border-color:rgba(229,84,107,.4)}
-pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;max-height:320px;overflow:auto;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--mut);line-height:1.6}
-.mut{color:var(--mut);font-size:13px}.hide{display:none}
-.actions{margin-top:14px;display:flex;gap:8px}
-.tip{display:block;text-align:left;color:var(--mut);font-size:12px;margin:6px 0 12px 2px}
-.cmdblock{border:1px solid var(--line);border-radius:9px;padding:12px;margin-bottom:12px;background:var(--card2)}
-.cmdblock h2{font-size:13.5px}
-/* lista de bots */
-.botitem{display:flex;align-items:center;gap:10px;padding:9px;border-radius:8px;cursor:pointer;border:1px solid transparent;margin-bottom:4px}
-.botitem:hover{background:var(--card2)}
-.botitem.sel{background:var(--card2);border-color:var(--acc)}
-.avatar{width:32px;height:32px;border-radius:8px;background:var(--card2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--acc);flex:0 0 auto;font-size:13px}
+body{margin:0;font:14px/1.5 var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01"}
+h1,h2,h3,p{margin:0}
+.ic{flex:0 0 auto;display:block}
+.hide{display:none!important}
+.mono{font-family:var(--mono);font-size:12.5px}
+code{font-family:var(--mono);font-size:12.5px;background:var(--hover);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+
+/* ---------- botões ---------- */
+button{font:inherit;cursor:pointer}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 13px;border-radius:var(--r);border:1px solid var(--border-2);background:var(--surface);color:var(--text-2);font-weight:500;font-size:13.5px;white-space:nowrap;box-shadow:var(--shadow-sm);transition:background .12s,border-color .12s,color .12s}
+.btn:hover{background:var(--hover);color:var(--text)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:#fff}
+.btn.ghost{background:transparent;border-color:transparent;box-shadow:none;color:var(--muted)}
+.btn.ghost:hover{background:var(--hover);color:var(--text)}
+.btn.danger{color:var(--bad)}
+.btn.danger:hover{background:var(--bad-bg);border-color:var(--bad-bd);color:var(--bad)}
+.btn.danger-solid{background:#d92d20;border-color:#d92d20;color:#fff}
+.btn.danger-solid:hover{background:#b42318;border-color:#b42318}
+.btn.sm{height:32px;padding:0 10px;font-size:13px}
+.btn:disabled{opacity:.55;cursor:default}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;flex:0 0 34px;border-radius:var(--r);border:1px solid transparent;background:transparent;color:var(--muted);transition:background .12s,color .12s}
+.iconbtn:hover{background:var(--hover);color:var(--text)}
+.iconbtn.danger:hover{background:var(--bad-bg);color:var(--bad)}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,.thumb:focus-within{outline:none;box-shadow:0 0 0 3px var(--ring);border-color:var(--accent)}
+
+/* ---------- campos ---------- */
+label{display:block;font-size:13px;font-weight:500;color:var(--text-2);margin:0 0 6px}
+input,textarea,select{width:100%;font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r);padding:8px 11px;box-shadow:var(--shadow-sm);transition:border-color .12s,box-shadow .12s}
+input,select{height:36px}
+textarea{resize:vertical;min-height:36px;line-height:1.45}
+select{appearance:none;padding-right:32px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23667085' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+input[type=file]{display:none}
+.field{margin-bottom:16px}.field:last-child{margin-bottom:0}
+.help{display:block;font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.45}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.inline{display:flex;gap:8px;align-items:center}.inline>input,.inline>select,.inline>.inputgroup{flex:1;min-width:0}
+.inputgroup{display:flex;align-items:stretch;border:1px solid var(--border-2);border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow-sm);overflow:hidden}
+.inputgroup:focus-within{box-shadow:0 0 0 3px var(--ring);border-color:var(--accent)}
+.inputgroup .adorn{display:flex;align-items:center;padding:0 0 0 11px;color:var(--faint);font-family:var(--mono)}
+.inputgroup input{border:0;box-shadow:none!important;padding-left:4px;background:transparent}
+.invalid{border-color:var(--bad)!important;box-shadow:0 0 0 3px var(--bad-bg)!important}
+.secret{-webkit-text-security:disc;font-family:var(--mono)}
+
+/* interruptor */
+.switch{position:relative;display:inline-block;width:36px;height:20px;flex:0 0 36px;margin:2px 0 0}
+.switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;z-index:1}
+.switch i{position:absolute;inset:0;border-radius:20px;background:var(--border-2);transition:background .15s}
+.switch i::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.25);transition:transform .15s}
+.switch input:checked+i{background:var(--accent)}
+.switch input:checked+i::after{transform:translateX(16px)}
+.switch input:focus-visible+i{box-shadow:0 0 0 3px var(--ring)}
+.setting{display:flex;gap:14px;align-items:flex-start;padding:16px 0;border-top:1px solid var(--border)}
+.setting:first-child{border-top:0;padding-top:0}.setting:last-child{padding-bottom:0}
+.setting b{display:block;font-weight:500;color:var(--text)}
+.setting span{color:var(--muted);font-size:13px}
+
+/* ---------- estrutura ---------- */
+.app{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:100vh}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px;font-weight:600;font-size:15px;letter-spacing:-.01em}
+.logo{width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center}
+.side-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px 18px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.botlist{flex:1;overflow-y:auto;padding:0 10px 10px}
+.botitem{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px;border-radius:var(--r);border:1px solid transparent;background:transparent;color:inherit;margin-bottom:2px}
+.botitem:hover{background:var(--hover)}
+.botitem.sel{background:var(--accent-soft)}
+.avatar{width:32px;height:32px;border-radius:8px;background:var(--hover);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px;color:var(--text-2);flex:0 0 auto}
+.botitem.sel .avatar{background:var(--surface);border-color:var(--border-2);color:var(--accent)}
 .botitem .meta{flex:1;min-width:0}
-.botitem .name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.botitem .hint{color:var(--mut);font-size:11px;font-family:ui-monospace,Menlo,monospace}
-.statuspill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--mut);flex:0 0 auto}
-.statuspill .dot{width:7px;height:7px;border-radius:50%;background:var(--mut)}
-.statuspill.on{color:var(--acc)}.statuspill.on .dot{background:var(--acc)}
-/* cabeçalho do bot selecionado */
-.botheader{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
-.nameinput{font-size:19px;font-weight:600;border-color:transparent;background:transparent;padding:5px 8px;flex:1;min-width:160px}
-.nameinput:hover,.nameinput:focus{border-color:var(--line);background:var(--card2)}
-/* abas verticais */
-.panelbody{display:grid;grid-template-columns:172px 1fr;gap:18px}
-.tabnav{display:flex;flex-direction:column;gap:2px}
-.tabnav button{display:flex;align-items:center;gap:8px;background:transparent;color:var(--mut);border:0;border-left:2px solid transparent;border-radius:0 6px 6px 0;padding:9px 10px;font-size:13.5px;font-weight:500;text-align:left}
-.tabnav button:hover{background:var(--card2);color:var(--txt)}
-.tabnav button.on{background:var(--card2);color:var(--txt);border-left-color:var(--acc)}
-.tabpanel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px;min-width:0}
-/* log */
-.logbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:12px 0 10px}
-.chip{background:transparent;border:1px solid var(--line);color:var(--mut);padding:5px 11px;border-radius:20px;font-size:12.5px;font-weight:500}
-.chip:hover{color:var(--txt);background:var(--card2)}
-.chip.on{background:var(--card2);color:var(--txt);border-color:var(--acc)}
-.chip .n{margin-left:5px;opacity:.65;font-variant-numeric:tabular-nums}
-.logbar input{flex:1;min-width:170px;width:auto}
-.logbox{background:var(--bg);border:1px solid var(--line);border-radius:9px;max-height:480px;overflow:auto;font-size:12.8px}
-.logrow{display:grid;grid-template-columns:64px 112px 1fr;gap:10px;padding:7px 12px;border-bottom:1px solid rgba(35,44,58,.7);align-items:start}
-.logrow:last-child{border-bottom:0}
-.logrow.erro{background:rgba(229,84,107,.06)}
-.logrow .t{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--mut);font-size:12px;padding-top:2px}
-.logrow .k{justify-self:start;font-size:11px;font-weight:600;padding:2px 9px;border-radius:12px;white-space:nowrap}
-.logrow .m{word-break:break-word;min-width:0}
-.logrow .hint{margin-top:4px;color:#E0A84B;font-size:12.3px}
-.k.erro{background:rgba(229,84,107,.16);color:var(--bad)}
-.k.aviso{background:rgba(224,168,75,.16);color:#E0A84B}
-.k.venda{background:rgba(47,191,159,.16);color:var(--acc)}
-.k.msg{background:rgba(120,160,255,.14);color:#9DBBFF}
-.k.sys{background:var(--card2);color:var(--mut)}
-.logempty{padding:28px 16px;text-align:center;color:var(--mut)}
+.botitem .name{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.botitem .sub{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:0 0 auto}.dot.on{background:#17b26a}
+.side-empty{padding:10px 8px;color:var(--muted);font-size:13px}
+.side-foot{display:flex;gap:6px;padding:10px;border-top:1px solid var(--border)}
+.side-foot .btn{flex:1}
+.main{min-width:0}
+.wrap{max-width:920px;margin:0 auto;padding:0 32px 64px}
+
+/* cabeçalho do bot */
+.pagehead{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.pagehead .wrap{display:flex;align-items:center;gap:16px;padding-top:18px;padding-bottom:0;flex-wrap:wrap}
+.ph-main{flex:1;min-width:220px}
+.nameinput{height:auto;font-size:20px;font-weight:600;letter-spacing:-.015em;border-color:transparent;background:transparent;box-shadow:none;padding:2px 8px;margin-left:-9px}
+.nameinput:hover{border-color:var(--border-2)}
+.ph-meta{display:flex;align-items:center;gap:10px;margin-top:4px;color:var(--muted);font-size:12.5px}
+.ph-actions{display:flex;align-items:center;gap:8px}
+.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:20px;font-size:12px;font-weight:500;border:1px solid var(--border);background:var(--surface);color:var(--text-2);white-space:nowrap}
+.badge.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-bd)}
+.badge.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-bd)}
+.badge.accent{color:var(--accent);background:var(--accent-soft);border-color:transparent}
+.unsaved{display:none}
+body.dirty .unsaved{display:inline-flex}
+.tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;width:100%;margin-top:14px}
+.tabs::-webkit-scrollbar{display:none}
+.tab{display:inline-flex;align-items:center;gap:7px;padding:9px 11px 11px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font-weight:500;font-size:13.5px;white-space:nowrap;border-radius:6px 6px 0 0}
+.tab:hover{color:var(--text)}
+.tab.on{color:var(--accent);border-bottom-color:var(--accent)}
+.wrap.tabbody{padding-top:28px}
+
+/* seções */
+.tabhead{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}
+.tabhead h1{font-size:18px;font-weight:600;letter-spacing:-.01em}
+.tabhead p{color:var(--muted);margin-top:4px;max-width:620px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-sm);margin-bottom:16px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border)}
+.card-head h2{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.card-head p{color:var(--muted);font-size:13px;margin-top:2px}
+.card-body{padding:20px}
+.card-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 20px;border-top:1px solid var(--border);background:var(--surface-2);border-radius:0 0 var(--r-lg) var(--r-lg)}
+.count{font-size:12px;font-weight:500;color:var(--muted);background:var(--hover);border-radius:20px;padding:1px 8px}
+.item{padding:16px 20px;border-top:1px solid var(--border)}
+.item:first-child{border-top:0}
+.item .help{margin:8px 0 0}
+.item .extra{margin-top:10px}
+.blank{padding:36px 20px;text-align:center;color:var(--muted)}
+.blank b{display:block;color:var(--text);font-weight:500;margin-bottom:2px}
+.blank .btn{margin-top:14px}
+
+/* avisos */
+.callout{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;background:var(--surface-2);font-size:13px;color:var(--text-2);margin-bottom:16px}
+.callout .ic{margin-top:1px;color:var(--muted)}
+.callout b{display:block;color:var(--text);font-weight:600;margin-bottom:1px}
+.callout.ok{background:var(--ok-bg);border-color:var(--ok-bd)}.callout.ok .ic{color:var(--ok)}
+.callout.warn{background:var(--warn-bg);border-color:var(--warn-bd)}.callout.warn .ic{color:var(--warn)}
+.callout.info{background:var(--info-bg);border-color:var(--info-bd)}.callout.info .ic{color:var(--info)}
+
+/* escolha da forma de cobrança */
+.choices{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.choice{display:flex;gap:11px;align-items:flex-start;text-align:left;padding:13px 14px;border:1px solid var(--border-2);border-radius:var(--r);background:var(--surface);color:inherit;box-shadow:var(--shadow-sm);transition:border-color .12s,background .12s}
+.choice:hover{border-color:var(--faint)}
+.choice.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent)}
+.choice .radio{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--border-2);flex:0 0 16px;margin-top:2px;background:var(--surface)}
+.choice.on .radio{border:5px solid var(--accent)}
+.choice b{display:block;font-weight:500}
+.choice small{display:block;color:var(--muted);font-size:12.5px;line-height:1.4;margin-top:2px}
+
 /* produtos */
-.prodrow{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:start;padding:12px 0;border-top:1px solid var(--line)}
-.cmdblock>.row+.prodrow{border-top:0;padding-top:4px}
-.thumb{width:64px;height:64px;margin:0;border-radius:9px;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;color:var(--mut);font-size:11px;text-align:center;line-height:1.3}
-.thumb:hover{border-color:var(--acc);color:var(--acc)}
+.prod{display:grid;grid-template-columns:60px minmax(0,1fr) auto;gap:14px;align-items:start;padding:16px 20px;border-top:1px solid var(--border)}
+.prod:first-child{border-top:0}
+.thumb{width:60px;height:60px;margin:0;border-radius:var(--r);border:1px dashed var(--border-2);background:var(--surface-2);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;color:var(--faint);transition:border-color .12s,color .12s}
+.thumb:hover{border-color:var(--accent);color:var(--accent)}
 .thumb img{width:100%;height:100%;object-fit:cover}
-.pfields{display:flex;flex-direction:column;gap:8px;min-width:0}
-.pfields .row{margin:0}
-.pfields .price{flex:0 0 140px}
-.invalid{border-color:var(--bad)!important;box-shadow:0 0 0 1px var(--bad)}
-/* token e status */
-.secret{-webkit-text-security:disc;font-family:ui-monospace,Menlo,Consolas,monospace}
-.statusbox{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin:12px 0;background:var(--card2);font-size:13px}
-.statusbox.ok{border-color:rgba(47,191,159,.45)}.statusbox.warn{border-color:rgba(224,168,75,.5)}
-.statusbox b{display:block;margin-bottom:2px}
-/* avisos (toast) */
-.toast{position:fixed;right:18px;bottom:18px;z-index:50;max-width:380px;background:var(--card2);color:var(--txt);border:1px solid var(--line);border-left-width:4px;border-radius:9px;padding:11px 15px;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.45);opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;pointer-events:none}
+.thumb.sm{width:44px;height:44px;flex:0 0 44px}
+.prod-fields{display:grid;gap:8px}
+.prod-fields .top{display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:8px}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 4px 0 10px;border:1px solid var(--border);border-radius:20px;background:var(--surface-2);font-size:13px;color:var(--text-2)}
+.tag button{display:flex;align-items:center;justify-content:center;width:18px;height:18px;border:0;border-radius:50%;background:transparent;color:var(--faint)}
+.tag button:hover{background:var(--bad-bg);color:var(--bad)}
+
+/* log */
+.logbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 20px;border-bottom:1px solid var(--border)}
+.seg{display:inline-flex;border:1px solid var(--border-2);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow-sm)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px;border:0;border-left:1px solid var(--border-2);background:var(--surface);color:var(--muted);font-size:13px;font-weight:500}
+.chip:first-child{border-left:0}
+.chip:hover{color:var(--text)}
+.chip.on{background:var(--hover);color:var(--text)}
+.chip .n{font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.searchbox{position:relative;flex:1;min-width:180px}
+.searchbox .ic{position:absolute;left:10px;top:9px;color:var(--faint);pointer-events:none}
+.searchbox input{height:32px;padding-left:32px;font-size:13px}
+.logbox{max-height:520px;overflow:auto;font-size:13px}
+.logrow{display:grid;grid-template-columns:66px 108px minmax(0,1fr);gap:12px;padding:8px 20px;border-top:1px solid var(--border);align-items:start}
+.logrow:first-child{border-top:0}
+.logrow.erro{background:var(--bad-bg)}
+.logrow .t{font-family:var(--mono);color:var(--faint);font-size:12px;padding-top:2px;font-variant-numeric:tabular-nums}
+.logrow .k{justify-self:start;font-size:11.5px;font-weight:500;padding:1px 8px;border-radius:20px;white-space:nowrap;border:1px solid var(--border);background:var(--surface-2);color:var(--muted)}
+.logrow .m{word-break:break-word;min-width:0;color:var(--text-2)}
+.loghint{display:flex;gap:7px;margin-top:6px;color:var(--warn);font-size:12.5px;line-height:1.45}
+.loghint .ic{margin-top:2px}
+.k.erro{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)}
+.k.aviso{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-bd)}
+.k.venda{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-bd)}
+.k.msg{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+.spacer{flex:1}
+.check{display:inline-flex;align-items:center;gap:9px;margin:0;font-weight:400;color:var(--text-2);font-size:13px}
+
+/* teste de pagamento */
+.trial{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.trial img{width:184px;height:184px;background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:8px;flex:0 0 auto}
+.trial .col{flex:1;min-width:240px}
+
+/* vazio */
+.empty{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px}
+.empty-box{max-width:400px;text-align:center}
+.empty-ic{width:44px;height:44px;border-radius:11px;border:1px solid var(--border);background:var(--surface);box-shadow:var(--shadow-sm);display:inline-flex;align-items:center;justify-content:center;color:var(--text-2);margin-bottom:16px}
+.empty h1{font-size:17px;font-weight:600}
+.empty p{color:var(--muted);margin-top:6px}
+.empty ol{text-align:left;color:var(--text-2);margin:18px 0;padding:14px 16px 14px 34px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);font-size:13.5px}
+.empty li{margin:4px 0}
+
+/* aviso flutuante */
+.toast{position:fixed;right:20px;bottom:20px;z-index:60;display:flex;gap:10px;align-items:flex-start;max-width:400px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px 14px;font-size:13.5px;box-shadow:var(--shadow-lg);opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s;pointer-events:none}
 .toast.show{opacity:1;transform:none}
-.toast.ok{border-left-color:var(--ok)}.toast.err{border-left-color:var(--bad)}.toast.warn{border-left-color:#E0A84B}
-button:disabled{opacity:.6;cursor:default}
-.dirty-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#E0A84B;margin-left:6px;vertical-align:middle}
+.toast .ic{margin-top:2px;color:var(--muted)}
+.toast.ok .ic{color:var(--ok)}.toast.err .ic{color:var(--bad)}.toast.warn .ic{color:var(--warn)}
+
+/* janela */
+.overlay{position:fixed;inset:0;z-index:70;background:rgba(12,17,29,.5);display:flex;align-items:center;justify-content:center;padding:20px;animation:fade .12s}
+.modal{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-lg);animation:pop .14s}
+.modal-head{padding:20px 22px 0}
+.modal-head h3{font-size:16px;font-weight:600}
+.modal-head p{color:var(--muted);margin-top:6px;font-size:13.5px}
+.modal-body{padding:18px 22px 0}
+.modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:22px}
+@keyframes fade{from{opacity:0}}
+@keyframes pop{from{opacity:0;transform:translateY(6px) scale(.98)}}
+
 @media(max-width:900px){
- .shell{grid-template-columns:1fr}
- aside{border-right:0;border-bottom:1px solid var(--line)}
- .panelbody{grid-template-columns:1fr}
- .tabnav{flex-direction:row;overflow-x:auto;gap:6px;padding-bottom:4px}
- .tabnav button{border-left:0;border-bottom:2px solid transparent;border-radius:6px;white-space:nowrap}
- .tabnav button.on{border-bottom-color:var(--acc)}
+ .app{grid-template-columns:1fr}
+ .sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--border)}
+ .brand{padding:14px 16px 8px}
+ .side-head{padding:6px 10px 4px 16px}
+ .botlist{display:flex;gap:6px;overflow-x:auto;padding:0 12px 10px;flex:none}
+ .botitem{width:auto;flex:0 0 auto;max-width:200px;margin:0;border-color:var(--border)}
+ .side-foot{position:absolute;top:10px;right:10px;border:0;padding:0}
+ .side-foot .btn span{display:none}
+ .wrap{padding:0 16px 48px}
+ .wrap.tabbody{padding-top:22px}
+ .pagehead{position:static}
+ .empty{min-height:60vh}
 }
 @media(max-width:640px){
- header{padding:10px 14px;flex-wrap:wrap;gap:8px}
- .brand{font-size:14px}
- .content{padding:12px}
- .tabpanel{padding:14px}
- .row{flex-wrap:wrap}
- .row>*{flex:1 1 100%;min-width:0}
- .row>button{flex:0 0 auto}
  input,textarea,select{font-size:16px} /* evita zoom automático no iPhone ao focar */
- .nameinput{font-size:17px;min-width:0;flex:1 1 100%}
- .botheader{gap:8px}
- .cmdblock img,.cmdblock div[style*="width:48px"],.cmdblock div[style*="width:40px"]{width:100%!important;height:120px!important}
- .prodrow{grid-template-columns:56px 1fr auto}
- .thumb{width:56px;height:56px}
- .thumb img{width:100%!important;height:100%!important}
- .pfields .price{flex:1 1 100%}
- .toast{left:12px;right:12px;bottom:12px;max-width:none}
- .logrow{grid-template-columns:auto 1fr;gap:6px 8px}
+ .grid2,.choices,.prod-fields .top{grid-template-columns:1fr}
+ .tabhead{flex-direction:column}
+ .ph-actions{width:100%}.ph-actions .savebtn{margin-left:auto}
+ .prod{grid-template-columns:48px minmax(0,1fr) auto;gap:10px;padding:14px 16px}
+ .thumb{width:48px;height:48px}
+ .card-body,.item{padding:16px}.card-head,.card-foot,.logbar{padding-left:16px;padding-right:16px}
+ .logrow{grid-template-columns:auto minmax(0,1fr);gap:4px 8px;padding:8px 16px}
  .logrow .m{grid-column:1/-1}
+ .inline.wrapsm{flex-wrap:wrap}.inline.wrapsm>.inputgroup,.inline.wrapsm>input,.inline.wrapsm>select{flex:1 1 100%}
+ .toast{left:12px;right:12px;bottom:12px;max-width:none}
 }
 </style></head><body>
-<header>
-
- <div class="brand"><span class="brand-mark">🤖</span>TeleBot Builder</div>
- <div style="display:flex;gap:8px">
- <button onclick="newBot()">+ Novo bot</button>
- <button class="ghost" onclick="logout()">Sair</button>
- </div>
-</header>
-<div class="shell">
-<aside id="list"></aside>
-<div class="content">
- <div class="mut" id="empty">Selecione um bot ao lado ou crie um novo com o token do BotFather.</div>
- <div id="editor" class="hide"></div>
-</div>
+<div class="app">
+ <aside class="sidebar">
+  <div class="brand"><span class="logo" id="logo"></span>TeleBot Builder</div>
+  <div class="side-head"><span>Seus bots</span><button class="iconbtn" id="newbtn" onclick="newBot()" title="Novo bot" aria-label="Novo bot"></button></div>
+  <nav id="list" class="botlist"></nav>
+  <div class="side-foot">
+   <button class="btn ghost sm" id="themebtn" onclick="toggleTheme()"></button>
+   <button class="btn ghost sm" id="outbtn" onclick="logout()"></button>
+  </div>
+ </aside>
+ <main class="main">
+  <div id="empty" class="empty"></div>
+  <div id="editor" class="hide"></div>
+ </main>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="modalroot"></div>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api=(m,p,b)=>fetch(p,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined}).then(r=>r.json());
-const TABS=[['t_cmd','💬','Comandos'],['t_prod','🛍','Produtos e Serviços'],['t_pay','💳','Pagamento'],['t_test','🧪','Testar pagamento'],['t_auto','⚡','Respostas auto'],['t_filter','🚫','Filtros'],['t_perm','🔒','Permissões'],['t_log','📜','Log']];
+
+// ---------- ícones (traço, 24x24) ----------
+const ICONS={
+ plus:'<path d="M12 5v14M5 12h14"/>',
+ x:'<path d="M18 6 6 18M6 6l12 12"/>',
+ trash:'<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>',
+ search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+ alert:'<path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3ZM12 9v4M12 17h.01"/>',
+ info:'<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+ ok:'<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+ chat:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+ box:'<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16ZM3.3 7l8.7 5 8.7-5M12 22V12"/>',
+ card:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>',
+ flask:'<path d="M10 2v7.5a2 2 0 0 1-.2.9L4.7 20.6a1 1 0 0 0 .9 1.4h12.8a1 1 0 0 0 .9-1.4L14.2 10.4a2 2 0 0 1-.2-.9V2M8.5 2h7M7 16h10"/>',
+ zap:'<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+ shield:'<path d="M20 13c0 5-3.5 7.5-7.7 9a1 1 0 0 1-.6 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/>',
+ sliders:'<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4"/>',
+ list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+ eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+ copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+ refresh:'<path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/>',
+ image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+ sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+ moon:'<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+ logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+ send:'<path d="m22 2-7 20-4-9-9-4ZM22 2 11 13"/>',
+ pause:'<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+ play:'<path d="M6 3l14 9-14 9z"/>',
+ bulb:'<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5M9 18h6M10 22h4"/>'
+};
+const I=(n,s)=>'<svg class="ic" width="'+(s||16)+'" height="'+(s||16)+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICONS[n]+'</svg>';
+
+const TABS=[['t_cmd','chat','Comandos'],['t_prod','box','Produtos'],['t_pay','card','Pagamento'],['t_test','flask','Testar'],['t_auto','zap','Respostas'],['t_filter','shield','Filtros'],['t_perm','sliders','Permissões'],['t_log','list','Log']];
 const ACTION_META={
  '':{label:'Responder com texto',desc:'Envia uma mensagem de texto quando o usuário digitar o comando.'},
- 'catalog':{label:'Abrir catálogo',desc:'Mostra automaticamente todos os produtos cadastrados na aba Produtos e Serviços.'},
+ 'catalog':{label:'Abrir catálogo',desc:'Mostra os produtos cadastrados na aba Produtos.'},
  'image':{label:'Enviar imagem',desc:'Envia uma foto com legenda quando o usuário digitar o comando.'},
- 'link':{label:'Abrir link',desc:'Envia um botão que abre um site ou link externo ao clicar.'},
- 'contact':{label:'Pedir contato',desc:'Mostra um botão para o usuário compartilhar o telefone dele com o bot.'},
- 'location':{label:'Pedir localização',desc:'Mostra um botão para o usuário compartilhar a localização dele com o bot.'},
- 'payment':{label:'Finalizar compra',desc:'Envia o resumo do carrinho (itens + total) e o pagamento: no modo chave Pix manda a chave, o recebedor e o QR Code; no modo automático (API) gera um Pix com o valor exato e confirma sozinho.'}
+ 'link':{label:'Abrir link',desc:'Envia um botão que abre um site ou link externo.'},
+ 'contact':{label:'Pedir contato',desc:'Mostra um botão para o usuário compartilhar o telefone com o bot.'},
+ 'location':{label:'Pedir localização',desc:'Mostra um botão para o usuário compartilhar a localização com o bot.'},
+ 'payment':{label:'Finalizar compra',desc:'Envia o resumo do carrinho e o pagamento, conforme a forma de cobrança escolhida na aba Pagamento.'}
 };
 const GATEWAY_META={ // a ordem aqui é a ordem da lista no painel
- mercadopago:{label:'Mercado Pago (recomendado)',hasEnv:false,tokenLabel:'Access Token do Mercado Pago',
-  about:'⭐ Recomendado: libera Pix pela API direto na conta, sem pedir liberação ao suporte. O modo é definido pelo próprio token: TEST-... é teste, APP_USR-... é venda real.',
-  where:'Onde pegar: mercadopago.com.br/developers → Suas integrações → crie uma aplicação → Credenciais de produção (ou de teste) → Access Token. A conta precisa ter chave Pix cadastrada.'},
+ mercadopago:{label:'Mercado Pago',recommended:true,hasEnv:false,tokenLabel:'Access Token do Mercado Pago',
+  about:'Libera Pix pela API direto na conta, sem pedir liberação ao suporte. O modo é definido pelo próprio token: TEST-... é teste, APP_USR-... é venda real.',
+  where:'Onde pegar: mercadopago.com.br/developers → Suas integrações → crie uma aplicação → Credenciais → Access Token. A conta precisa ter chave Pix cadastrada.'},
  pagbank:{label:'PagBank',hasEnv:true,tokenLabel:'Token da API do PagBank',
-  about:'Para vender de verdade o PagBank precisa liberar a API de Pix em produção na sua conta (peça ao suporte).',
+  about:'Para vender de verdade, o PagBank precisa liberar a API de Pix em produção na sua conta (peça ao suporte).',
   where:'Onde pegar: acesso.pagbank.com.br → Venda online → Integrações → Gerar Token. A conta precisa ter chave Pix cadastrada.'},
  asaas:{label:'Asaas',hasEnv:true,tokenLabel:'Chave de API do Asaas',
   about:'Pix pela API com conta de pessoa física ou empresa. Tem ambiente Sandbox separado para testes (conta criada em sandbox.asaas.com).',
   where:'Onde pegar: no Asaas, Menu do usuário → Integrações → Chave de API → Gerar nova chave (começa com $aact_).'}
 };
 const MODE_META={
- 'contains':{label:'contém',desc:'A resposta dispara quando a mensagem do usuário contém essa palavra ou frase em qualquer parte do texto.'},
- 'exact':{label:'exata',desc:'A resposta só dispara quando a mensagem do usuário for exatamente igual a essa palavra ou frase.'}
+ 'contains':{label:'Contém',desc:'Dispara quando a mensagem contém essa palavra ou frase em qualquer parte do texto.'},
+ 'exact':{label:'Exata',desc:'Só dispara quando a mensagem for exatamente igual a essa palavra ou frase.'}
 };
-const PAY_META={
- '':{label:'Nenhum',desc:'Pagamento desativado — o bot não vai enviar nenhuma opção de pagamento.'},
- 'api':{label:'Atendimento automático (API de pagamento)',desc:'Pix automático pelo PagBank, Mercado Pago ou Asaas: o bot pede nome, CPF e e-mail do cliente, gera o QR Code com o valor exato, confirma o pagamento sozinho e avisa você e o cliente.'},
- 'pixqr':{label:'Pix com valor exato (sem dados do cliente)',desc:'O bot monta o QR Code Pix com a sua chave e o valor exato do carrinho, sem pedir CPF nem e-mail. Você recebe cada pedido no Telegram e confirma com um toque; o bot avisa o cliente.'},
- 'pix':{label:'Atendimento direto (chave Pix)',desc:'O bot envia sua chave Pix e instruções; o cliente paga manualmente e você confirma o recebimento por fora.'}
+const PAY_META={ // a ordem aqui é a ordem dos cartões
+ 'api':{label:'Pix automático',desc:'Mercado Pago, PagBank ou Asaas geram a cobrança e o bot confirma o pagamento sozinho. Pede nome, CPF e e-mail do cliente.'},
+ 'pixqr':{label:'Pix com valor exato',desc:'QR Code com a sua chave e o valor do carrinho, sem pedir dados do cliente. Você confirma cada pedido com um toque no Telegram.'},
+ 'pix':{label:'Chave Pix simples',desc:'O bot envia sua chave Pix e instruções. O cliente digita o valor e você confere por fora.'},
+ '':{label:'Sem pagamento',desc:'O bot não oferece nenhuma opção de pagamento.'}
 };
 let bots=[],sel=null,tab='t_cmd';
 const cur=()=>bots.find(x=>x.id===sel);
 
-async function refresh(){bots=await api('GET','/api/bots');if(sel&&!cur())sel=null;renderList();renderEditor()}
+// ---------- peças de interface ----------
+const field=(label,control,help)=>'<div class="field">'+(label?'<label>'+label+'</label>':'')+control+(help?'<small class="help">'+help+'</small>':'')+'</div>';
+const tabhead=(title,desc,action)=>'<div class="tabhead"><div><h1>'+title+'</h1><p>'+desc+'</p></div>'+(action||'')+'</div>';
+const callout=(kind,icon,title,text)=>'<div class="callout '+kind+'">'+I(icon,18)+'<div><b>'+title+'</b>'+text+'</div></div>';
+const blank=(title,text,action)=>'<div class="blank"><b>'+title+'</b>'+text+(action?'<div>'+action+'</div>':'')+'</div>';
+const delBtn=(title,onclick)=>'<button class="iconbtn danger" type="button" title="'+title+'" aria-label="'+title+'" onclick="'+onclick+'">'+I('trash')+'</button>';
+
+function toast(msg,kind){
+ const t=$('toast');
+ t.innerHTML=I(kind==='ok'?'ok':kind==='info'||!kind?'info':'alert',18)+'<span>'+esc(msg)+'</span>';
+ t.className='toast show '+(kind||'');clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',kind==='ok'?2600:6500)}
+
+function modal(o){ // devolve os valores do formulário (objeto) ou null se cancelado
+ return new Promise(res=>{
+  const root=$('modalroot');
+  root.innerHTML='<div class="overlay"><form class="modal" role="dialog" aria-modal="true" autocomplete="off">'
+   +'<div class="modal-head"><h3>'+esc(o.title)+'</h3>'+(o.desc?'<p>'+o.desc+'</p>':'')+'</div>'
+   +(o.body?'<div class="modal-body">'+o.body+'</div>':'')
+   +'<div class="modal-foot"><button type="button" class="btn" data-x>Cancelar</button>'
+   +'<button type="submit" class="btn '+(o.danger?'danger-solid':'primary')+'">'+esc(o.ok||'Confirmar')+'</button></div></form></div>';
+  const ov=root.firstChild,form=ov.querySelector('form');
+  const onKey=e=>{if(e.key==='Escape')close(null)};
+  const close=v=>{root.innerHTML='';document.removeEventListener('keydown',onKey);res(v)};
+  document.addEventListener('keydown',onKey);
+  ov.addEventListener('mousedown',e=>{if(e.target===ov)close(null)});
+  ov.querySelector('[data-x]').onclick=()=>close(null);
+  form.onsubmit=e=>{e.preventDefault();close(Object.fromEntries(new FormData(form)))};
+  (form.querySelector('input,textarea')||form.querySelector('[type=submit]')).focus()})}
+
+function toggleTheme(){
+ const t=document.documentElement.dataset.theme==='dark'?'light':'dark';
+ document.documentElement.dataset.theme=t;localStorage.setItem('tb-theme',t);paintChrome()}
+function paintChrome(){
+ const dark=document.documentElement.dataset.theme==='dark';
+ $('logo').innerHTML=I('send',15);$('newbtn').innerHTML=I('plus');
+ $('themebtn').innerHTML=I(dark?'sun':'moon')+'<span>'+(dark?'Tema claro':'Tema escuro')+'</span>';
+ $('outbtn').innerHTML=I('logout')+'<span>Sair</span>'}
+
+// ---------- lista de bots ----------
+async function refresh(){bots=await api('GET','/api/bots');if(sel&&!cur())sel=null;if(!sel&&bots.length)sel=bots[0].id;renderList();renderEditor()}
 function renderList(){
- if(!bots.length){$('list').innerHTML='<div class="mut">Nenhum bot ainda.</div>';return}
- $('list').innerHTML=bots.map(b=>'<div class="botitem'+(sel===b.id?' sel':'')+'" data-id="'+b.id+'">'
-  +'<div class="avatar">'+esc((b.name||'?').trim().charAt(0).toUpperCase())+'</div>'
-  +'<div class="meta"><div class="name">'+esc(b.name)+'</div><div class="hint">'+esc(b.token_hint)+'</div></div>'
-  +'<span class="statuspill'+(b.enabled?' on':'')+'"><span class="dot"></span></span></div>').join('');
+ if(!bots.length){$('list').innerHTML='<div class="side-empty">Nenhum bot ainda.</div>';return}
+ $('list').innerHTML=bots.map(b=>'<button class="botitem'+(sel===b.id?' sel':'')+'" data-id="'+b.id+'">'
+  +'<span class="avatar">'+esc((b.name||'?').trim().charAt(0).toUpperCase())+'</span>'
+  +'<span class="meta"><span class="name">'+esc(b.name)+'</span><span class="sub"><i class="dot'+(b.enabled?' on':'')+'"></i>'+(b.enabled?'Ativo':'Pausado')+'</span></span></button>').join('');
  document.querySelectorAll('.botitem').forEach(el=>el.onclick=()=>{collect();sel=el.dataset.id;renderList();renderEditor()})}
 async function logout(){await api('POST','/api/logout');window.location.href='/login'}
 async function newBot(){
- const t=prompt('Token do BotFather:');if(!t)return;
- const n=prompt('Nome do bot:','MeuBot')||'MeuBot';
- const j=await api('POST','/api/bots/new',{token:t,name:n});
- if(j.ok){sel=j.id;tab='t_cmd';toast('Bot criado ✓','ok');refresh()}else toast(j.err,'err')}
+ const v=await modal({title:'Novo bot',ok:'Criar bot',
+  desc:'No Telegram, abra o <b>@BotFather</b>, envie <code>/newbot</code> e copie o token que ele devolver.',
+  body:field('Token do BotFather','<input name="token" class="mono" required spellcheck="false" placeholder="123456789:AAE...">')
+   +field('Nome do bot','<input name="name" value="Meu bot" maxlength="40">','Só aparece aqui no painel.')});
+ if(!v)return;
+ let j;try{j=await api('POST','/api/bots/new',{token:v.token.trim(),name:(v.name||'').trim()||'Meu bot'})}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
+ if(j.ok){sel=j.id;tab='t_cmd';toast('Bot criado','ok');refresh()}else toast(j.err,'err')}
 
-function rows(list,fields,ph){ // linhas editáveis genéricas (usado por auto_replies)
- return cur()[list].map((r,i)=>{
-  const line='<div class="row">'+fields.map(f=>f.t==='area'
-   ?'<textarea rows="2" data-l="'+list+'" data-i="'+i+'" data-f="'+f.k+'" placeholder="'+f.p+'">'+esc(r[f.k])+'</textarea>'
-   :f.t==='mode'
-   ?'<select data-l="'+list+'" data-i="'+i+'" data-f="mode" onchange="collect();renderEditor()"><option value="contains"'+(r.mode!=='exact'?' selected':'')+'>'+MODE_META.contains.label+'</option><option value="exact"'+(r.mode==='exact'?' selected':'')+'>'+MODE_META.exact.label+'</option></select>'
-   :'<input data-l="'+list+'" data-i="'+i+'" data-f="'+f.k+'" value="'+esc(r[f.k])+'" placeholder="'+f.p+'">').join('')
-   +'<button class="ghost" title="Remover" onclick="rm(\''+list+'\','+i+')">✕</button></div>';
-  const hasMode=fields.some(f=>f.t==='mode');
-  const tip=hasMode?'<small class="tip">'+MODE_META[r.mode==='exact'?'exact':'contains'].desc+'</small>':'';
-  return line+tip;
- }).join('')}
-const saveBtn='<div class="actions"><button class="savebtn" onclick="save()">Salvar</button><span class="mut" style="align-self:center">ou Ctrl+S</span></div>';
+// ---------- comandos e respostas ----------
+function rows(list){ // regras de resposta automática
+ const items=cur()[list];
+ if(!items.length)return blank('Nenhuma regra ainda','Crie uma regra para o bot responder sozinho a palavras ou frases.');
+ return items.map((r,i)=>'<div class="item"><div class="inline wrapsm">'
+  +'<input data-l="'+list+'" data-i="'+i+'" data-f="match" value="'+esc(r.match)+'" placeholder="Palavra ou frase">'
+  +'<select style="flex:0 0 130px" data-l="'+list+'" data-i="'+i+'" data-f="mode" onchange="collect();renderEditor()"><option value="contains"'+(r.mode!=='exact'?' selected':'')+'>'+MODE_META.contains.label+'</option><option value="exact"'+(r.mode==='exact'?' selected':'')+'>'+MODE_META.exact.label+'</option></select>'
+  +delBtn('Remover regra','rm(\''+list+'\','+i+')')+'</div>'
+  +'<div class="extra"><textarea rows="2" data-l="'+list+'" data-i="'+i+'" data-f="reply" placeholder="Resposta do bot">'+esc(r.reply)+'</textarea></div>'
+  +'<small class="help">'+MODE_META[r.mode==='exact'?'exact':'contains'].desc+'</small></div>').join('')}
 
 function cmdRows(b){
- if(!b.commands.length)return '<p class="mut">Nenhum comando ainda.</p>';
+ if(!b.commands.length)return blank('Nenhum comando ainda','Comandos são o que o cliente digita com "/" no Telegram, como /start.');
  return b.commands.map((c,i)=>{
   const act=c.action||'';
   let extra='';
   if(act===''){
-   extra='<textarea rows="2" data-l="commands" data-i="'+i+'" data-f="text" placeholder="resposta">'+esc(c.text)+'</textarea>';
+   extra='<textarea rows="2" data-l="commands" data-i="'+i+'" data-f="text" placeholder="Resposta do bot">'+esc(c.text)+'</textarea>';
   }else if(act==='image'){
-   const thumb=c.image?'<img src="/images/'+esc(c.image)+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--line);flex:0 0 auto">':'';
-   extra='<div class="row" style="align-items:center">'+thumb
-    +'<input type="file" accept="image/*" onchange="uploadCmdImage(this,'+i+')">'
-    +'<textarea rows="1" data-l="commands" data-i="'+i+'" data-f="text" placeholder="legenda">'+esc(c.text)+'</textarea></div>';
+   extra='<div class="inline" style="align-items:flex-start"><label class="thumb sm" title="Escolher imagem">'+(c.image?'<img src="/images/'+esc(c.image)+'" alt="">':I('image',18))
+    +'<input type="file" accept="image/*" onchange="uploadCmdImage(this,'+i+')"></label>'
+    +'<textarea rows="2" data-l="commands" data-i="'+i+'" data-f="text" placeholder="Legenda da imagem">'+esc(c.text)+'</textarea></div>';
   }else if(act==='link'){
-   extra='<div class="row"><input data-l="commands" data-i="'+i+'" data-f="url" value="'+esc(c.url||'')+'" placeholder="https://exemplo.com">'
-    +'<input data-l="commands" data-i="'+i+'" data-f="text" value="'+esc(c.text)+'" placeholder="texto do botão"></div>';
+   extra='<div class="grid2"><input data-l="commands" data-i="'+i+'" data-f="url" value="'+esc(c.url||'')+'" placeholder="https://exemplo.com">'
+    +'<input data-l="commands" data-i="'+i+'" data-f="text" value="'+esc(c.text)+'" placeholder="Texto do botão"></div>';
   }
-  return '<div class="cmdblock">'
-   +'<div class="row">'
-   +'<input data-l="commands" data-i="'+i+'" data-f="cmd" value="'+esc(c.cmd)+'" placeholder="nome (sem /)">'
+  return '<div class="item"><div class="inline wrapsm">'
+   +'<div class="inputgroup"><span class="adorn">/</span><input data-l="commands" data-i="'+i+'" data-f="cmd" value="'+esc(c.cmd)+'" placeholder="comando" spellcheck="false"></div>'
    +'<select data-l="commands" data-i="'+i+'" data-f="action" onchange="collect();renderEditor()">'
    +Object.entries(ACTION_META).map(([v,m])=>'<option value="'+v+'"'+(act===v?' selected':'')+'>'+m.label+'</option>').join('')
-   +'</select>'
-   +'<button class="ghost" title="Remover" onclick="rm(\'commands\','+i+')">✕</button>'
-   +'</div>'
-   +'<small class="tip">'+ACTION_META[act].desc+'</small>'
-   +extra
-   +'</div>'
+   +'</select>'+delBtn('Remover comando','rm(\'commands\','+i+')')+'</div>'
+   +(extra?'<div class="extra">'+extra+'</div>':'')
+   +'<small class="help">'+ACTION_META[act].desc+'</small></div>'
  }).join('')}
 
-async function uploadCmdImage(input,i){
+async function uploadImage(input,apply){
  if(!input.files||!input.files[0])return;
  if(!collect())return;
  try{
@@ -249,10 +452,14 @@ async function uploadCmdImage(input,i){
   const r=await fetch('/api/upload_image',{method:'POST',body:fd});
   const j=await r.json();
   if(!j.ok){toast('Erro ao enviar imagem: '+j.err,'err');return}
-  cur().commands[i].image=j.filename;
-  setDirty(true);toast('Foto enviada. Clique em Salvar para aplicar.','ok');renderEditor()
- }catch(e){toast('Falha ao enviar imagem (erro '+(e&&e.message||e)+')','err')}}
+  apply(j.filename);
+  setDirty(true);toast('Imagem enviada. Clique em Salvar para aplicar.','ok');renderEditor()
+ }catch(e){toast('Falha ao enviar imagem ('+(e&&e.message||e)+')','err')}}
+const uploadCmdImage=(input,i)=>uploadImage(input,f=>cur().commands[i].image=f);
+const uploadProdImage=(input,i)=>uploadImage(input,f=>cur().products[i].image=f);
+const uploadQr=input=>uploadImage(input,f=>cur().payment.qr_image=f);
 
+// ---------- produtos ----------
 function catGroups(b){
  const groups=new Map();
  b.products.forEach((p,i)=>{
@@ -269,25 +476,21 @@ function parsePrice(s){ // mesma regra do servidor: 'R$ 1.234,56' -> 1234.56
 const fmtPrice=v=>'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 function priceBlur(el){const v=parsePrice(el.value);if(v>0){el.value=fmtPrice(v);el.classList.remove('invalid')}}
 function prodRow(p,i){
- const thumb=p.image?'<img src="/images/'+esc(p.image)+'" alt="">':'📷<br>foto';
- return '<div class="prodrow">'
-  +'<label class="thumb" title="Clique para escolher a foto">'+thumb
-  +'<input type="file" accept="image/*" hidden onchange="uploadProdImage(this,'+i+')"></label>'
-  +'<div class="pfields"><div class="row">'
+ return '<div class="prod">'
+  +'<label class="thumb" title="Escolher foto">'+(p.image?'<img src="/images/'+esc(p.image)+'" alt="">':I('image',20))
+  +'<input type="file" accept="image/*" onchange="uploadProdImage(this,'+i+')"></label>'
+  +'<div class="prod-fields"><div class="top">'
   +'<input data-l="products" data-i="'+i+'" data-f="name" value="'+esc(p.name)+'" placeholder="Nome do produto" maxlength="64">'
-  +'<input class="price" data-l="products" data-i="'+i+'" data-f="price" value="'+esc(p.price)+'" placeholder="R$ 0,00" inputmode="decimal" name="valor_item_'+i+'" onblur="priceBlur(this)">'
+  +'<input data-l="products" data-i="'+i+'" data-f="price" value="'+esc(p.price)+'" placeholder="R$ 0,00" inputmode="decimal" name="valor_item_'+i+'" onblur="priceBlur(this)">'
   +'</div><textarea rows="2" data-l="products" data-i="'+i+'" data-f="description" placeholder="Descrição (aparece no bot)">'+esc(p.description)+'</textarea></div>'
-  +'<button class="ghost" title="Remover produto" onclick="rm(\'products\','+i+')">✕</button></div>'}
+  +delBtn('Remover produto','rm(\'products\','+i+')')+'</div>'}
 function prodCatalogHTML(b){
- const groups=catGroups(b);
- if(!b.products.length)return '<p class="mut">Nenhuma categoria ainda. Clique em "+ Nova categoria" para começar.</p>';
+ if(!b.products.length)return '<section class="card">'+blank('Nenhum produto cadastrado','Crie uma categoria e adicione os produtos dela. Cada categoria vira um catálogo que o cliente escolhe no bot.','<button class="btn" onclick="newCategory()">'+I('plus')+'Nova categoria</button>')+'</section>';
  let html='';
- for(const [cat,idxs] of groups){
-  html+='<div class="cmdblock"><div class="row" style="align-items:center">'
-   +'<h2 style="margin:0;flex:1">'+esc(cat)+' <span class="mut">('+idxs.length+')</span></h2>'
-   +'<button class="ghost" onclick="addProductToCat(\''+esc(cat).replace(/'/g,"\\'")+'\')">+ Produto</button></div>'
-   +idxs.map(i=>prodRow(b.products[i],i)).join('')
-   +'</div>';
+ for(const [cat,idxs] of catGroups(b)){
+  html+='<section class="card"><div class="card-head"><h2>'+esc(cat)+'<span class="count">'+idxs.length+'</span></h2>'
+   +'<button class="btn sm" onclick="addProductToCat(\''+esc(cat).replace(/'/g,"\\'")+'\')">'+I('plus')+'Adicionar produto</button></div>'
+   +'<div>'+idxs.map(i=>prodRow(b.products[i],i)).join('')+'</div></section>';
  }
  return html}
 function addProductToCat(cat){
@@ -295,143 +498,127 @@ function addProductToCat(cat){
  const i=cur().products.push({name:'',price:'',description:'',image:'',category:cat})-1;
  setDirty(true);renderEditor();
  const f=document.querySelector('[data-l="products"][data-i="'+i+'"][data-f="name"]');if(f)f.focus()}
-function newCategory(){
- const name=(prompt('Nome da nova categoria (ex: Cursos, Ferramentas digitais):')||'').trim();
- if(!name)return;
- addProductToCat(name)}
+async function newCategory(){
+ const v=await modal({title:'Nova categoria',ok:'Criar categoria',
+  body:field('Nome da categoria','<input name="name" required maxlength="40" placeholder="Ex: Cursos, Ferramentas digitais">')});
+ const name=v&&(v.name||'').trim();
+ if(name)addProductToCat(name)}
 
-async function uploadProdImage(input,i){
- if(!input.files||!input.files[0])return;
- if(!collect())return;
- try{
-  const fd=new FormData();fd.append('image',input.files[0]);
-  const r=await fetch('/api/upload_image',{method:'POST',body:fd});
-  const j=await r.json();
-  if(!j.ok){toast('Erro ao enviar imagem: '+j.err,'err');return}
-  cur().products[i].image=j.filename;
-  setDirty(true);toast('Foto enviada. Clique em Salvar para aplicar.','ok');renderEditor()
- }catch(e){toast('Falha ao enviar imagem (erro '+(e&&e.message||e)+')','err')}}
-
+// ---------- pagamento ----------
+function setPayType(v){$('pay_type').value=v;collect();setDirty(true);renderEditor()}
+const pixFields=b=>field('Sua chave Pix','<input id="pay_pixkey" value="'+esc(b.payment.pix_key||'')+'" placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória">','Telefone: use o formato +55 com DDD, por exemplo +55 11 98765-4321.')
+ +'<div class="grid2">'+field('Nome do recebedor','<input id="pay_pixname" maxlength="25" value="'+esc(b.payment.pix_name||'')+'" placeholder="Como aparece no Pix">')
+ +field('Cidade','<input id="pay_pixcity" maxlength="15" value="'+esc(b.payment.pix_city||'')+'" placeholder="Ex: São Paulo">')+'</div>';
+const adminField=(b,help)=>field('Seu ID do Telegram','<input id="pay_admin" inputmode="numeric" value="'+esc(b.payment.admin_chat_id||'')+'" placeholder="Ex: 123456789">',help+' Descubra o seu ID com o @userinfobot e mande /start para o seu próprio bot uma vez.');
 function payBlock(b){
  b.payment=b.payment||{type:'',pix_key:'',pix_name:'',instructions:'',qr_image:''};
- const t=b.payment.type||'';
+ const t=PAY_META[b.payment.type]?b.payment.type:'';
  let extra='';
  if(t==='pix'){
-  const thumb=b.payment.qr_image?'<img src="/images/'+esc(b.payment.qr_image)+'" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">':'';
-  extra='<label>Sua chave Pix</label><input id="pay_pixkey" value="'+esc(b.payment.pix_key||'')+'" placeholder="e-mail, CPF, telefone ou chave aleatória">'
-   +'<label>Nome do recebedor</label><input id="pay_pixname" value="'+esc(b.payment.pix_name||'')+'" placeholder="Nome que aparece no Pix">'
-   +'<label>Instruções para o cliente</label><textarea id="pay_instructions" rows="3" placeholder="Ex: envie o comprovante aqui depois de pagar.">'+esc(b.payment.instructions||'')+'</textarea>'
-   +'<label>Imagem do QR Code (opcional)</label><div class="row" style="align-items:center">'+thumb+'<input type="file" accept="image/*" onchange="uploadQr(this)"></div>';
+  extra='<section class="card"><div class="card-head"><div><h2>Chave Pix</h2><p>O bot envia estes dados ao cliente na hora de pagar.</p></div></div><div class="card-body">'
+   +field('Sua chave Pix','<input id="pay_pixkey" value="'+esc(b.payment.pix_key||'')+'" placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória">')
+   +field('Nome do recebedor','<input id="pay_pixname" value="'+esc(b.payment.pix_name||'')+'" placeholder="Nome que aparece no Pix">')
+   +field('Instruções para o cliente','<textarea id="pay_instructions" rows="3" placeholder="Ex: envie o comprovante aqui depois de pagar.">'+esc(b.payment.instructions||'')+'</textarea>')
+   +field('Imagem do QR Code (opcional)','<label class="thumb" title="Escolher imagem">'+(b.payment.qr_image?'<img src="/images/'+esc(b.payment.qr_image)+'" alt="">':I('image',20))+'<input type="file" accept="image/*" onchange="uploadQr(this)"></label>')
+   +'</div></section>';
  }else if(t==='pixqr'){
-  const okKey=(b.payment.pix_key||'').trim();
-  extra=(okKey
-    ?'<div class="statusbox ok"><span>✅</span><div><b>Pix com valor exato ativo</b>O cliente não precisa informar nenhum dado. Você recebe cada pedido no Telegram com o botão Confirmar pagamento.</div></div>'
-    :'<div class="statusbox warn"><span>⚠️</span><div><b>Falta a sua chave Pix</b>Sem ela o bot não consegue montar o QR Code.</div></div>')
-   +'<label>Sua chave Pix</label><input id="pay_pixkey" value="'+esc(b.payment.pix_key||'')+'" placeholder="CPF, CNPJ, e-mail, telefone (+55 11 9...) ou chave aleatória">'
-   +'<small class="tip">Telefone: use o formato +55 com DDD, por exemplo +55 11 98765-4321.</small>'
-   +'<div class="row"><div><label>Nome do recebedor</label><input id="pay_pixname" maxlength="25" value="'+esc(b.payment.pix_name||'')+'" placeholder="Como aparece no Pix"></div>'
-   +'<div><label>Cidade</label><input id="pay_pixcity" maxlength="15" value="'+esc(b.payment.pix_city||'')+'" placeholder="Ex: São Paulo"></div></div>'
-   +'<label>Instruções para o cliente (opcional)</label><textarea id="pay_instructions" rows="2" placeholder="Ex: o acesso é enviado aqui no chat depois da confirmação.">'+esc(b.payment.instructions||'')+'</textarea>'
-   +'<label>Seu ID do Telegram (recebe cada pedido com o botão Confirmar pagamento)</label><input id="pay_admin" value="'+esc(b.payment.admin_chat_id||'')+'" placeholder="Ex: 123456789 — descubra com o @userinfobot">'
-   +'<small class="tip">Mande /start para o seu próprio bot uma vez. Sem o seu ID, ninguém consegue confirmar os pagamentos.</small>';
+  extra='<section class="card"><div class="card-head"><div><h2>Dados do Pix</h2><p>Usados para montar o QR Code com o valor exato de cada pedido.</p></div></div><div class="card-body">'
+   +((b.payment.pix_key||'').trim()
+     ?callout('ok','ok','Pix com valor exato ativo','O cliente não informa nenhum dado. Você recebe cada pedido no Telegram com o botão Confirmar pagamento.')
+     :callout('warn','alert','Falta a sua chave Pix','Sem ela o bot não consegue montar o QR Code.'))
+   +pixFields(b)
+   +field('Instruções para o cliente (opcional)','<textarea id="pay_instructions" rows="2" placeholder="Ex: o acesso é enviado aqui no chat depois da confirmação.">'+esc(b.payment.instructions||'')+'</textarea>')
+   +adminField(b,'Recebe cada pedido com o botão Confirmar pagamento; sem ele ninguém consegue confirmar.')
+   +'</div></section>';
  }else if(t==='api'){
   const gw=GATEWAY_META[b.payment.gateway]?b.payment.gateway:'mercadopago';
   const G=GATEWAY_META[gw];
   const env=b.payment.api_env||'sandbox';
   // a dica do token salvo só vale se o intermediador escolhido for o mesmo do token salvo
   const hint=(b.payment.api_token_gateway===gw&&b.payment.api_token_hint)||'';
-  const status=hint
-   ?'<div class="statusbox ok"><span>✅</span><div><b>Pix automático ativo · '+G.label+'</b>Token salvo (termina em '+esc(hint.replace('...',''))+') · '+(env==='producao'?'Produção (vendas reais)':'Modo de testes')+'</div></div>'
-   :'<div class="statusbox warn"><span>⚠️</span><div><b>Falta o token do '+G.label+'</b>Sem ele o bot não consegue gerar o QR Code. Cole o token abaixo, clique em Testar e depois em Salvar.</div></div>';
-  extra=status
-   +'<label>Intermediador de pagamento</label><select id="pay_gateway" onchange="collect();renderEditor()">'
-   +Object.entries(GATEWAY_META).map(([v,m])=>'<option value="'+v+'"'+(gw===v?' selected':'')+'>'+m.label+'</option>').join('')
-   +'</select><small class="tip">'+G.about+'</small>'
-   +(G.hasEnv
-     ?'<label>Ambiente</label><select id="pay_env">'
-      +'<option value="sandbox"'+(env!=='producao'?' selected':'')+'>Sandbox (testes, sem dinheiro real)</option>'
-      +'<option value="producao"'+(env==='producao'?' selected':'')+'>Produção (vendas reais)</option></select>'
-     :'')
-   +'<label>'+G.tokenLabel+'</label><div class="row">'
+  extra='<section class="card"><div class="card-head"><div><h2>Intermediador'+(G.recommended?'<span class="badge accent">Recomendado</span>':'')+'</h2><p>Quem gera a cobrança e confirma o pagamento.</p></div></div><div class="card-body">'
+   +(hint
+     ?callout('ok','ok','Pix automático ativo · '+G.label,'Token salvo (final '+esc(hint.replace('...',''))+') · '+(env==='producao'?'Produção, vendas reais':'Modo de testes'))
+     :callout('warn','alert','Falta o token do '+G.label,'Cole o token abaixo, clique em Testar token e depois em Salvar.'))
+   +'<div class="'+(G.hasEnv?'grid2':'')+'">'
+   +field('Intermediador','<select id="pay_gateway" onchange="collect();renderEditor()">'
+     +Object.entries(GATEWAY_META).map(([v,m])=>'<option value="'+v+'"'+(gw===v?' selected':'')+'>'+m.label+(m.recommended?' (recomendado)':'')+'</option>').join('')+'</select>',G.hasEnv?'':G.about)
+   +(G.hasEnv?field('Ambiente','<select id="pay_env">'
+     +'<option value="sandbox"'+(env!=='producao'?' selected':'')+'>Sandbox (testes)</option>'
+     +'<option value="producao"'+(env==='producao'?' selected':'')+'>Produção (vendas reais)</option></select>'):'')
+   +'</div>'+(G.hasEnv?'<small class="help" style="margin:-8px 0 16px">'+G.about+'</small>':'')
    // campo de texto mascarado (e não type=password) para o navegador não preencher a senha do painel aqui
-   +'<input id="pay_token" class="secret" type="text" name="gateway_api_token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore value="'+esc(b.payment.api_token||'')+'" placeholder="'+(hint?'Deixe em branco para manter o token salvo':'Cole aqui o '+G.tokenLabel.toLowerCase())+'">'
-   +'<button class="ghost" type="button" onclick="toggleSecret(this)">Mostrar</button>'
-   +'<button class="ghost" type="button" onclick="testToken(this)">Testar token</button></div>'
-   +'<small class="tip">'+G.where+' O token nunca volta para o navegador.</small>'
-   +'<label>Seu ID do Telegram (recebe o aviso de cada venda paga)</label><input id="pay_admin" value="'+esc(b.payment.admin_chat_id||'')+'" placeholder="Ex: 123456789 — descubra com o @userinfobot">'
-   +'<small class="tip">Mande /start para o seu próprio bot uma vez; sem isso o Telegram não deixa ele te enviar o aviso.</small>'
-   +'<div class="cmdblock" style="margin-top:14px"><h2>Chave Pix reserva (opcional, recomendado)</h2>'
-   +'<p class="mut" style="margin:0 0 6px">Se o '+G.label+' recusar a cobrança (token inválido, conta sem liberação, instabilidade), o bot envia um Pix com valor exato para esta chave em vez de perder a venda. Esses pedidos você confirma com o botão no Telegram.</p>'
-   +'<label>Sua chave Pix</label><input id="pay_pixkey" value="'+esc(b.payment.pix_key||'')+'" placeholder="CPF, CNPJ, e-mail, telefone (+55 11 9...) ou chave aleatória">'
-   +'<div class="row"><div><label>Nome do recebedor</label><input id="pay_pixname" maxlength="25" value="'+esc(b.payment.pix_name||'')+'" placeholder="Como aparece no Pix"></div>'
-   +'<div><label>Cidade</label><input id="pay_pixcity" maxlength="15" value="'+esc(b.payment.pix_city||'')+'" placeholder="Ex: São Paulo"></div></div></div>';
+   +field(G.tokenLabel,'<div class="inline wrapsm"><input id="pay_token" class="secret" type="text" name="gateway_api_token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore value="'+esc(b.payment.api_token||'')+'" placeholder="'+(hint?'Deixe em branco para manter o token salvo':'Cole o token aqui')+'">'
+     +'<button class="btn" type="button" onclick="toggleSecret(this)">Mostrar</button>'
+     +'<button class="btn" type="button" onclick="testToken(this)">Testar token</button></div>',G.where+' O token nunca volta para o navegador.')
+   +adminField(b,'Recebe o aviso de cada venda paga.')
+   +'</div></section>'
+   +'<section class="card"><div class="card-head"><div><h2>Chave Pix reserva<span class="badge">Opcional</span></h2><p>Se o '+G.label+' recusar a cobrança, o bot envia um Pix com valor exato para esta chave em vez de perder a venda.</p></div></div><div class="card-body">'
+   +pixFields(b)+'</div></section>';
  }
- return '<h2>Pagamento</h2><p class="mut">Escolha como o bot cobra. O cliente finaliza pelo botão 🛒 Carrinho → ✅ Finalizar compra (ou por um comando com a ação "Finalizar compra").</p>'
-  +'<label>Tipo</label><select id="pay_type" onchange="collect();renderEditor()">'
-  +Object.entries(PAY_META).map(([v,m])=>'<option value="'+v+'"'+(t===v?' selected':'')+'>'+m.label+'</option>').join('')
-  +'</select><small class="tip">'+PAY_META[t].desc+'</small>'
-  +extra+saveBtn}
+ return tabhead('Pagamento','Como o bot cobra. O cliente paga pelo carrinho ou por um comando com a ação "Finalizar compra".')
+  +'<section class="card"><div class="card-head"><h2>Forma de cobrança</h2></div><div class="card-body"><div class="choices">'
+  +Object.entries(PAY_META).map(([v,m])=>'<button type="button" class="choice'+(t===v?' on':'')+'" onclick="setPayType(\''+v+'\')"><span class="radio"></span><span><b>'+m.label+'</b><small>'+m.desc+'</small></span></button>').join('')
+  +'</div><input type="hidden" id="pay_type" value="'+t+'"></div></section>'+extra}
 
-async function uploadQr(input){
- if(!input.files||!input.files[0])return;
- if(!collect())return;
- try{
-  const fd=new FormData();fd.append('image',input.files[0]);
-  const r=await fetch('/api/upload_image',{method:'POST',body:fd});
-  const j=await r.json();
-  if(!j.ok){toast('Erro ao enviar imagem: '+j.err,'err');return}
-  cur().payment.qr_image=j.filename;
-  setDirty(true);toast('Foto enviada. Clique em Salvar para aplicar.','ok');renderEditor()
- }catch(e){toast('Falha ao enviar imagem (erro '+(e&&e.message||e)+')','err')}}
-
+// ---------- editor ----------
+function renderEmpty(){
+ $('empty').innerHTML='<div class="empty-box"><span class="empty-ic">'+I('send',20)+'</span><h1>Crie seu primeiro bot</h1>'
+  +'<p>Monte um bot de vendas para o Telegram sem escrever código.</p>'
+  +'<ol><li>No Telegram, abra o <b>@BotFather</b> e envie <code>/newbot</code>.</li><li>Copie o token que ele devolver.</li><li>Clique em Novo bot e cole o token.</li></ol>'
+  +'<button class="btn primary" onclick="newBot()">'+I('plus')+'Novo bot</button></div>'}
 function renderEditor(){
  const b=cur();
  $('empty').classList.toggle('hide',!!b);$('editor').classList.toggle('hide',!b);
- if(!b)return;
+ if(!b){renderEmpty();return}
  b.products=b.products||[];
  b.payment=b.payment||{type:'',pix_key:'',pix_name:'',instructions:'',qr_image:''};
  $('editor').innerHTML=
- '<div class="botheader">'
- +'<input id="f_name" class="nameinput" value="'+esc(b.name)+'" placeholder="Nome do bot">'
- +'<span class="statuspill'+(b.enabled?' on':'')+'"><span class="dot"></span>'+(b.enabled?'Ativo':'Pausado')+'</span>'
- +'<button class="ghost" onclick="toggleEnable()">'+(b.enabled?'Pausar':'Ativar')+'</button>'
- +'<button class="danger" onclick="delBot()">Excluir</button>'
- +'</div>'
- +'<div class="panelbody">'
- +'<div class="tabnav">'+TABS.map(([id,icon,l])=>'<button class="'+(tab===id?'on':'')+'" onclick="setTab(\''+id+'\')">'+icon+' '+l+'</button>').join('')+'</div>'
- +'<div class="tabpanel">'
- +'<div id="t_cmd"><h2>Comandos</h2><p class="mut">Ficam visíveis no menu "/" do bot no Telegram. Escolha a ação — a explicação aparece logo abaixo do menu.</p>'+cmdRows(b)
- +'<button class="ghost" onclick="add(\'commands\',{cmd:\'\',text:\'\',action:\'\'})">+ Comando</button>'+saveBtn+'</div>'
- +'<div id="t_prod"><h2>Produtos e Serviços</h2><p class="mut">Crie uma categoria, adicione os produtos dela e salve. Para vender outro tipo de produto, clique em "+ Nova categoria" e repita. Cada categoria vira um catálogo separado que o cliente escolhe no bot.</p>'+prodCatalogHTML(b)
- +'<button class="ghost" onclick="newCategory()">+ Nova categoria</button>'+saveBtn+'</div>'
+ '<header class="pagehead"><div class="wrap">'
+ +'<div class="ph-main"><input id="f_name" class="nameinput" value="'+esc(b.name)+'" placeholder="Nome do bot" aria-label="Nome do bot">'
+ +'<div class="ph-meta"><span class="badge'+(b.enabled?' ok':'')+'"><i class="dot'+(b.enabled?' on':'')+'"></i>'+(b.enabled?'Ativo':'Pausado')+'</span><span class="mono">'+esc(b.token_hint)+'</span></div></div>'
+ +'<div class="ph-actions"><span class="badge warn unsaved">Alterações não salvas</span>'
+ +'<button class="btn" onclick="toggleEnable()">'+I(b.enabled?'pause':'play',14)+(b.enabled?'Pausar':'Ativar')+'</button>'
+ +delBtn('Excluir bot','delBot()')
+ +'<button class="btn primary savebtn" onclick="save()">Salvar</button></div>'
+ +'<nav class="tabs" role="tablist">'+TABS.map(([id,ic,l])=>'<button class="tab'+(tab===id?' on':'')+'" role="tab" aria-selected="'+(tab===id)+'" onclick="setTab(\''+id+'\')">'+I(ic,15)+l+'</button>').join('')+'</nav>'
+ +'</div></header>'
+ +'<div class="wrap tabbody">'
+ +'<div id="t_cmd">'+tabhead('Comandos','Aparecem no menu "/" do bot no Telegram.','<button class="btn" onclick="add(\'commands\',{cmd:\'\',text:\'\',action:\'\'})">'+I('plus')+'Novo comando</button>')
+ +'<section class="card">'+cmdRows(b)+'</section></div>'
+ +'<div id="t_prod">'+tabhead('Produtos','Organize por categoria. Cada categoria vira um catálogo que o cliente escolhe no bot.',b.products.length?'<button class="btn" onclick="newCategory()">'+I('plus')+'Nova categoria</button>':'')
+ +prodCatalogHTML(b)+'</div>'
  +'<div id="t_pay">'+payBlock(b)+'</div>'
  +'<div id="t_test">'+testBlock(b)+'</div>'
- +'<div id="t_auto"><h2>Respostas automáticas</h2>'+rows('auto_replies',[{k:'match',p:'palavra'},{t:'mode'},{k:'reply',t:'area',p:'resposta'}])
- +'<button class="ghost" onclick="add(\'auto_replies\',{match:\'\',mode:\'contains\',reply:\'\'})">+ Regra</button>'+saveBtn+'</div>'
- +'<div id="t_filter"><h2>Palavras banidas</h2><p class="mut">Clique numa palavra para remover.</p><div>'
- +b.banned_words.map((w,i)=>'<span class="tag" onclick="rmBan('+i+')">'+esc(w)+' ✕</span>').join('')
- +'</div><div class="row" style="margin-top:8px"><input id="banword" placeholder="palavra"><button class="ghost" onclick="addBan()">Adicionar</button></div>'+saveBtn+'</div>'
- +'<div id="t_perm"><h2>Permissões e chat</h2>'
- +'<label style="display:flex;gap:8px;align-items:flex-start;color:var(--txt);font-size:13.5px"><input type="checkbox" id="auto_clean" style="margin-top:3px" '+(b.auto_clean!==false?'checked':'')+'>'
- +'<span>🧹 <b>Chat limpo</b> — apaga automaticamente as mensagens já usadas depois de cada escolha do cliente (catálogo anterior, carrinho, perguntas respondidas e as respostas com nome, CPF e e-mail). O QR Code e o copia e cola somem quando o pagamento é confirmado.</span></label>'
- +'<label><input type="checkbox" id="admin_only" '+(b.admin_only?'checked':'')+'> Somente admins do grupo / whitelist</label>'
- +'<label>Whitelist (IDs do Telegram separados por vírgula)</label><input id="whitelist" value="'+esc((b.whitelist||[]).join(', '))+'">'+saveBtn+'</div>'
- +'<div id="t_log"><h2>Log</h2><p class="mut">Tudo o que o bot recebe e faz, com os erros explicados.</p>'
- +'<div class="logbar">'+LOG_FILTERS.map(([f,l])=>'<button class="chip'+(logFilter===f?' on':'')+'" data-f="'+f+'" onclick="setLogFilter(\''+f+'\')">'+l+'<span class="n"></span></button>').join('')
- +'<input id="logq" type="search" placeholder="🔎 Buscar no log" value="'+esc(logQuery)+'" oninput="logQuery=this.value;renderLog()"></div>'
- +'<div id="logbox" class="logbox"><div class="logempty">carregando...</div></div>'
- +'<div class="actions" style="align-items:center;flex-wrap:wrap">'
- +'<label style="display:flex;align-items:center;gap:6px;margin:0;font-size:13px"><input type="checkbox" '+(logAuto?'checked':'')+' onchange="logAuto=this.checked"> Atualizar sozinho (5s)</label>'
- +'<span style="flex:1"></span><button class="ghost" onclick="loadLog()">Atualizar</button><button class="ghost" onclick="copyLog()">Copiar</button><button class="danger" onclick="clearLog()">Limpar log</button></div></div>'
- +'</div></div>';
+ +'<div id="t_auto">'+tabhead('Respostas automáticas','O bot responde sozinho quando a mensagem do cliente bate com uma regra.','<button class="btn" onclick="add(\'auto_replies\',{match:\'\',mode:\'contains\',reply:\'\'})">'+I('plus')+'Nova regra</button>')
+ +'<section class="card">'+rows('auto_replies')+'</section></div>'
+ +'<div id="t_filter">'+tabhead('Filtros','Mensagens com estas palavras recebem um aviso e não são respondidas.')
+ +'<section class="card"><div class="card-head"><h2>Palavras bloqueadas<span class="count">'+b.banned_words.length+'</span></h2></div><div class="card-body">'
+ +'<div class="inline" style="margin-bottom:'+(b.banned_words.length?'14px':'0')+'"><input id="banword" placeholder="Digite uma palavra e pressione Enter" onkeydown="if(event.key===\'Enter\'){event.preventDefault();addBan()}"><button class="btn" onclick="addBan()">Adicionar</button></div>'
+ +'<div class="tags">'+b.banned_words.map((w,i)=>'<span class="tag">'+esc(w)+'<button type="button" title="Remover" aria-label="Remover '+esc(w)+'" onclick="rmBan('+i+')">'+I('x',12)+'</button></span>').join('')+'</div>'
+ +'</div></section></div>'
+ +'<div id="t_perm">'+tabhead('Permissões e chat','Quem pode usar o bot e como a conversa se comporta.')
+ +'<section class="card"><div class="card-body">'
+ +'<div class="setting"><label class="switch"><input type="checkbox" id="auto_clean" '+(b.auto_clean!==false?'checked':'')+'><i></i></label><div><b>Chat limpo</b><span>Apaga as mensagens já usadas depois de cada escolha do cliente: catálogo anterior, carrinho, perguntas respondidas e as respostas com nome, CPF e e-mail. O QR Code some quando o pagamento é confirmado.</span></div></div>'
+ +'<div class="setting"><label class="switch"><input type="checkbox" id="admin_only" '+(b.admin_only?'checked':'')+'><i></i></label><div><b>Uso restrito</b><span>Só administradores do grupo e os IDs da lista abaixo podem usar o bot.</span></div></div>'
+ +'<div class="setting" style="display:block">'+field('IDs liberados','<input id="whitelist" value="'+esc((b.whitelist||[]).join(', '))+'" placeholder="Ex: 123456789, 987654321">','IDs do Telegram separados por vírgula. Só vale com o uso restrito ligado.')+'</div>'
+ +'</div></section></div>'
+ +'<div id="t_log">'+tabhead('Log','Tudo o que o bot recebe e faz, com os erros explicados.')
+ +'<section class="card"><div class="logbar"><div class="seg">'+LOG_FILTERS.map(([f,l])=>'<button class="chip'+(logFilter===f?' on':'')+'" data-f="'+f+'" onclick="setLogFilter(\''+f+'\')">'+l+'<span class="n"></span></button>').join('')+'</div>'
+ +'<div class="searchbox">'+I('search',15)+'<input id="logq" type="search" placeholder="Buscar no log" value="'+esc(logQuery)+'" oninput="logQuery=this.value;renderLog()"></div></div>'
+ +'<div id="logbox" class="logbox"><div class="blank">Carregando...</div></div>'
+ +'<div class="card-foot"><label class="check"><span class="switch"><input type="checkbox" '+(logAuto?'checked':'')+' onchange="logAuto=this.checked"><i></i></span>Atualizar a cada 5 segundos</label>'
+ +'<span class="spacer"></span><button class="btn sm" onclick="loadLog()">'+I('refresh',14)+'Atualizar</button><button class="btn sm" onclick="copyLog()">'+I('copy',14)+'Copiar</button><button class="btn sm danger" onclick="clearLog()">Limpar</button></div></section></div>'
+ +'</div>';
  // o painel não é formulário de login: impede o navegador de preencher e-mail/senha salvos nos campos
- $('editor').querySelectorAll('input:not([type=file]):not([type=checkbox]),textarea').forEach(e=>e.setAttribute('autocomplete','off'));
+ $('editor').querySelectorAll('input:not([type=file]):not([type=checkbox]):not([type=hidden]),textarea').forEach(e=>e.setAttribute('autocomplete','off'));
  setDirty(dirty);
- showTab()}
+ showTab();
+ const on=document.querySelector('.tab.on');if(on&&on.scrollIntoView)on.scrollIntoView({block:'nearest',inline:'nearest'})}
 function showTab(){TABS.forEach(([id])=>{const e=$(id);if(e)e.classList.toggle('hide',id!==tab)});if(tab==='t_log')loadLog()}
 function setTab(id){collect();tab=id;renderEditor()}
 
-function collect(){ // lê os campos da tela para o objeto local; devolve false se JSON inválido
+function collect(){ // lê os campos da tela para o objeto local
  const b=cur();if(!b||!$('f_name'))return true;
  b.name=$('f_name').value;
  document.querySelectorAll('[data-l]').forEach(e=>{let v=e.value;if(e.dataset.f==='cmd')v=v.replace(/^\//,'').toLowerCase();b[e.dataset.l][e.dataset.i][e.dataset.f]=v});
@@ -453,12 +640,12 @@ function collect(){ // lê os campos da tela para o objeto local; devolve false 
  return true}
 function add(list,obj){if(!collect())return;cur()[list].push(obj);setDirty(true);renderEditor()}
 function rm(list,i){if(!collect())return;cur()[list].splice(i,1);setDirty(true);renderEditor()}
-function addBan(){if(!collect())return;const v=$('banword').value.trim().toLowerCase();if(!v)return;const b=cur();if(!b.banned_words.includes(v))b.banned_words.push(v);setDirty(true);renderEditor()}
+function addBan(){if(!collect())return;const v=$('banword').value.trim().toLowerCase();if(!v)return;const b=cur();if(!b.banned_words.includes(v))b.banned_words.push(v);setDirty(true);renderEditor();$('banword').focus()}
 function rmBan(i){if(!collect())return;cur().banned_words.splice(i,1);setDirty(true);renderEditor()}
-function toast(msg,kind){const t=$('toast');t.textContent=msg;t.className='toast show '+(kind||'');clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',kind==='ok'?2500:6000)}
+
 let dirty=false;
-function setDirty(v){dirty=v;document.querySelectorAll('.savebtn').forEach(x=>x.innerHTML=v?'Salvar alterações<span class="dirty-dot"></span>':'Salvar')}
-function validate(b){ // devolve mensagem de erro ou '' ; marca o campo com problema
+function setDirty(v){dirty=v;document.body.classList.toggle('dirty',v);document.querySelectorAll('.savebtn').forEach(x=>{x.disabled=false;x.textContent='Salvar'})}
+function validate(b){ // devolve [mensagem, índice, campo] do primeiro produto com problema, ou null
  for(let i=0;i<b.products.length;i++){
   const p=b.products[i];
   if(!(p.name||'').trim())return['Um produto está sem nome (categoria "'+((p.category||'').trim()||'Geral')+'").',i,'name'];
@@ -478,9 +665,8 @@ async function save(){
  const btns=[...document.querySelectorAll('.savebtn')];btns.forEach(x=>{x.disabled=true;x.textContent='Salvando...'});
  let j;
  try{j=await api('PUT','/api/bots/'+b.id,b)}catch(e){j={ok:false,err:'Sem conexão com o servidor. Suas alterações continuam na tela; tente salvar de novo.'}}
- btns.forEach(x=>x.disabled=false);
  if(!j.ok){toast(j.err||'Erro ao salvar','err');setDirty(true);return} // não recarrega: nada do que foi digitado se perde
- setDirty(false);toast(j.warn||'Alterações salvas ✓',j.warn?'warn':'ok');refresh()}
+ setDirty(false);toast(j.warn||'Alterações salvas',j.warn?'warn':'ok');refresh()}
 function toggleSecret(btn){const el=$('pay_token');const on=el.classList.toggle('secret');btn.textContent=on?'Mostrar':'Ocultar'}
 async function testToken(btn){
  collect();const b=cur();btn.disabled=true;btn.textContent='Testando...';
@@ -494,34 +680,36 @@ async function toggleEnable(){
  if(!collect())return;const b=cur();b.enabled=!b.enabled;
  let j;try{j=await api('PUT','/api/bots/'+b.id,b)}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
  if(!j.ok){b.enabled=!b.enabled;toast(j.err||'Erro','err');return}
- setDirty(false);toast(b.enabled?'Bot ativado ✓':'Bot pausado','ok');refresh()}
-async function delBot(){if(!confirm('Excluir este bot?'))return;await api('DELETE','/api/bots/'+sel);sel=null;refresh()}
+ setDirty(false);toast(b.enabled?'Bot ativado':'Bot pausado','ok');refresh()}
+async function delBot(){
+ const b=cur();
+ if(!await modal({title:'Excluir este bot?',desc:'<b>'+esc(b.name)+'</b> para de responder no Telegram e toda a configuração dele é apagada. Não dá para desfazer.',ok:'Excluir bot',danger:true}))return;
+ await api('DELETE','/api/bots/'+sel);sel=null;setDirty(false);toast('Bot excluído','ok');refresh()}
+
 // ---------- Testar pagamento ----------
 let trialKey=null,trialTimer=null;
 function testBlock(b){
  const p=b.payment||{},t=p.type||'';
  const G=GATEWAY_META[p.gateway]||GATEWAY_META.mercadopago;
- let conf,form='';
- if(t==='api'){
-  conf='Atendimento automático · '+G.label+' · '+(p.api_env==='producao'?'Produção (dinheiro real)':'Modo de testes')+(p.api_token_hint?'':' · ⚠️ sem token salvo');
-  form='<div class="row"><div><label>Nome do pagador</label><input id="tr_nome" autocomplete="off" placeholder="Seu nome completo"></div>'
-   +'<div><label>CPF do pagador</label><input id="tr_cpf" autocomplete="off" inputmode="numeric" placeholder="Só números"></div></div>'
-   +'<label>E-mail do pagador</label><input id="tr_email" autocomplete="off" placeholder="Use um e-mail diferente do da sua conta">'
-   +'<small class="tip">O intermediador exige esses dados na cobrança. No Mercado Pago, o e-mail do pagador não pode ser o mesmo da conta que recebe.</small>';
- }else if(t==='pixqr'){conf='Pix com valor exato · chave '+esc(p.pix_key||'(não salva)')}
- else conf='Nenhum pagamento automático salvo. Escolha na aba Pagamento e clique em Salvar.';
- return '<h2>Testar pagamento</h2><p class="mut">Gera uma cobrança de <b>R$ 1,00</b> com a configuração <b>salva</b>, direto aqui, sem passar pelo Telegram e sem avisar nenhum cliente. Em produção o valor é real e cai na sua conta.</p>'
-  +'<div class="statusbox"><span>⚙️</span><div><b>Configuração salva</b>'+conf+'</div></div>'
-  +(t==='api'?'<div class="actions" style="margin-top:0"><button class="ghost" onclick="trialToken(this)">1. Testar conexão</button></div>':'')
-  +form
-  +'<div class="actions">'
-  +(t==='api'||t==='pixqr'?'<button onclick="trialCreate(this)">'+(t==='api'?'2. ':'')+'Gerar Pix de teste (R$ 1,00)</button>':'')
-  +(t==='api'&&(p.pix_key||'').trim()?'<button class="ghost" onclick="trialCreate(this,true)">Testar chave reserva</button>':'')
-  +'</div><div id="trial_out"></div>'}
+ const head=tabhead('Testar pagamento','Gera uma cobrança de R$ 1,00 com a configuração salva, sem passar pelo Telegram e sem avisar nenhum cliente.');
+ if(t!=='api'&&t!=='pixqr')return head+'<section class="card">'+blank('Nada para testar ainda','Escolha Pix automático ou Pix com valor exato na aba Pagamento e clique em Salvar.','<button class="btn" onclick="setTab(\'t_pay\')">Ir para Pagamento</button>')+'</section>';
+ const prod=t==='api'&&p.api_env==='producao';
+ const conf=t==='api'
+  ?callout(p.api_token_hint?(prod?'warn':'info'):'warn',p.api_token_hint?'info':'alert','Pix automático · '+G.label,p.api_token_hint?(prod?'Modo produção: o R$ 1,00 é real e cai na sua conta.':'Modo de testes: nenhum dinheiro real é movimentado.'):'Nenhum token salvo. Configure na aba Pagamento.')
+  :callout('info','info','Pix com valor exato','Chave salva: '+esc(p.pix_key||'nenhuma')+'. A confirmação é pelo app do seu banco.');
+ const form=t==='api'
+  ?'<div class="grid2">'+field('Nome do pagador','<input id="tr_nome" autocomplete="off" placeholder="Nome completo">')+field('CPF do pagador','<input id="tr_cpf" autocomplete="off" inputmode="numeric" placeholder="Só números">')+'</div>'
+   +field('E-mail do pagador','<input id="tr_email" autocomplete="off" placeholder="nome@exemplo.com">','O intermediador exige esses dados. No Mercado Pago, o e-mail do pagador não pode ser o mesmo da conta que recebe.')
+  :'';
+ return head+'<section class="card"><div class="card-body">'+conf+form+'</div>'
+  +'<div class="card-foot">'+(t==='api'?'<button class="btn" onclick="trialToken(this)">Testar conexão</button>':'')
+  +(t==='api'&&(p.pix_key||'').trim()?'<button class="btn" onclick="trialCreate(this,true)">Testar chave reserva</button>':'')
+  +'<span class="spacer"></span><button class="btn primary" onclick="trialCreate(this)">Gerar Pix de teste</button></div></section>'
+  +'<div id="trial_out"></div>'}
 async function trialToken(btn){
  btn.disabled=true;btn.textContent='Testando...';
  let j;try{j=await api('POST','/api/bots/'+sel+'/payment_test',{})}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
- btn.disabled=false;btn.textContent='1. Testar conexão';
+ btn.disabled=false;btn.textContent='Testar conexão';
  toast(j.ok?j.msg:j.err,j.ok?'ok':'err')}
 async function trialCreate(btn,fallback){
  if(dirty){toast('Salve as alterações antes de testar: o teste usa a configuração salva.','warn');return}
@@ -531,34 +719,34 @@ async function trialCreate(btn,fallback){
  let j;try{j=await api('POST','/api/bots/'+sel+'/payment_trial',body)}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
  btn.disabled=false;btn.textContent=label;
  if(!j.ok){toast(j.err,'err');return}
- trialKey=j.key;toast('Pix de teste gerado ✓','ok');
- $('trial_out').innerHTML='<div class="cmdblock" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">'
-  +(j.qr?'<img src="'+j.qr+'" alt="QR Code do Pix de teste" style="width:190px;height:190px;background:#fff;border-radius:8px;padding:6px;flex:0 0 auto">':'')
-  +'<div style="flex:1;min-width:220px"><b>Pix de teste gerado ✓</b><p class="mut" style="margin:4px 0 8px">Pague pelo app do seu banco para testar o ciclo completo.</p>'
-  +'<label>Pix copia e cola</label><textarea id="trial_copia" rows="4" readonly style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">'+esc(j.copia)+'</textarea>'
-  +(j.key_used?'<small class="tip">Chave usada no Pix: <b>'+esc(j.key_used)+'</b> — confira se é a sua.</small>':'')
-  +'<div class="actions"><button class="ghost" onclick="copyTrial()">Copiar código</button>'
-  +(j.manual?'':'<button class="ghost" onclick="trialStatus()">3. Verificar pagamento</button>')+'</div>'
-  +'<div id="trial_status" class="mut" style="margin-top:8px">'+(j.manual?'No Pix com valor exato a confirmação é pelo app do seu banco (o nome do recebedor deve ser o seu).':'')+'</div></div></div>';
+ trialKey=j.key;toast('Pix de teste gerado','ok');
+ $('trial_out').innerHTML='<section class="card"><div class="card-head"><div><h2>Pix de teste</h2><p>Pague pelo app do seu banco para testar o ciclo completo.</p></div><span class="badge" id="trial_badge">'+(j.manual?'Confirmação manual':'Aguardando pagamento')+'</span></div>'
+  +'<div class="card-body trial">'+(j.qr?'<img src="'+j.qr+'" alt="QR Code do Pix de teste">':'')
+  +'<div class="col">'+field('Pix copia e cola','<textarea id="trial_copia" class="mono" rows="5" readonly>'+esc(j.copia)+'</textarea>',j.key_used?'Chave usada no Pix: <b>'+esc(j.key_used)+'</b>. Confira se é a sua.':'')
+  +'<div class="inline"><button class="btn" onclick="copyTrial()">'+I('copy',14)+'Copiar código</button>'
+  +(j.manual?'':'<button class="btn" onclick="trialStatus()">'+I('refresh',14)+'Verificar agora</button>')+'</div>'
+  +'<small class="help" id="trial_status">'+(j.manual?'Ao pagar, confira no app do banco se o nome do recebedor é o seu.':'A verificação roda sozinha a cada 5 segundos.')+'</small></div></div></section>';
  clearInterval(trialTimer);
  if(!j.manual){let n=0;trialTimer=setInterval(()=>{if(tab!=='t_test'||!trialKey||++n>60){clearInterval(trialTimer);return}trialStatus(true)},5000)}}
 async function trialStatus(silent){
  if(!trialKey)return;
  let j;try{j=await api('POST','/api/bots/'+sel+'/payment_trial',{action:'status',key:trialKey})}catch(e){j={ok:false,err:'Sem conexão com o servidor'}}
- const s=$('trial_status');
- if(!j.ok){if(s)s.textContent='⚠️ '+j.err;return}
- if(j.paid){clearInterval(trialTimer);trialKey=null;if(s)s.innerHTML='<b style="color:var(--ok)">✅ Pagamento recebido! O ciclo completo está funcionando.</b>';toast('Pagamento de teste recebido ✓','ok')}
- else if(s)s.textContent='⏳ Ainda não pago — verificando sozinho a cada 5 segundos...'}
-function copyTrial(){navigator.clipboard.writeText($('trial_copia').value).then(()=>toast('Código copiado ✓','ok'),()=>toast('Selecione o código e use Ctrl+C','err'))}
+ const s=$('trial_status'),bd=$('trial_badge');
+ if(!j.ok){if(s)s.textContent=j.err;return}
+ if(j.paid){clearInterval(trialTimer);trialKey=null;
+  if(bd){bd.className='badge ok';bd.textContent='Pago'}
+  if(s)s.textContent='Pagamento recebido. O ciclo completo está funcionando.';toast('Pagamento de teste recebido','ok')}
+ else if(s&&!silent)s.textContent='Ainda não pago. A verificação continua a cada 5 segundos.'}
+function copyTrial(){navigator.clipboard.writeText($('trial_copia').value).then(()=>toast('Código copiado','ok'),()=>toast('Selecione o código e use Ctrl+C','err'))}
 
 // ---------- Log ----------
-const LOG_KIND={ERR:['erro','Erro'],WARN:['aviso','Aviso'],SYS:['sys','Sistema'],PAGO:['venda','💰 Pago'],PIX:['venda','Pix gerado'],
+const LOG_KIND={ERR:['erro','Erro'],WARN:['aviso','Aviso'],SYS:['sys','Sistema'],PAGO:['venda','Pago'],PIX:['venda','Pix gerado'],
  COMPRA:['venda','Compra'],CARRINHO:['venda','Carrinho'],CMD:['msg','Comando'],CATALOGO:['msg','Catálogo'],AUTO:['msg','Resposta auto'],
  TEXT:['msg','Mensagem'],CALLBACK:['msg','Botão'],CONTATO:['msg','Contato'],LOCALIZACAO:['msg','Localização'],FILTRO:['aviso','Filtro']};
 const LOG_FILTERS=[['all','Todos'],['erro','Erros'],['venda','Vendas'],['msg','Mensagens'],['sys','Sistema']];
 const LOG_HINTS=[ // [padrão, explicação] — a primeira que casar aparece embaixo do erro
- [/whitelist access required/i,'O PagBank ainda não liberou a API de Pix em produção para a sua conta. Peça a "liberação da API Orders com Pix em produção" ao suporte do PagBank. Enquanto isso, use o ambiente Sandbox ou o modo chave Pix.'],
- [/(PagBank|Mercado Pago|Asaas) 40[13]|UNAUTHORIZED|Invalid credential|invalid_access_token/i,'O intermediador recusou o token. Na aba Pagamento, use "Testar token" e confira o Ambiente (Sandbox ou Produção).'],
+ [/whitelist access required/i,'O PagBank ainda não liberou a API de Pix em produção para a sua conta. Peça a "liberação da API Orders com Pix em produção" ao suporte do PagBank. Enquanto isso, use outro intermediador ou o Pix com valor exato.'],
+ [/(PagBank|Mercado Pago|Asaas) 40[13]|UNAUTHORIZED|Invalid credential|invalid_access_token/i,'O intermediador recusou o token. Na aba Pagamento, use "Testar token" e confira o ambiente (Sandbox ou Produção).'],
  [/Mercado Pago 4\d\d.*(Collector user without key|key enabled for QR)/i,'Sua conta do Mercado Pago não tem chave Pix cadastrada. Cadastre uma chave Pix no app do Mercado Pago e tente de novo.'],
  [/Asaas 4\d\d.*(cpfCnpj|invalid_customer)/i,'O Asaas recusou o CPF do cliente. Peça para o cliente conferir o CPF.'],
  [/(PagBank|Mercado Pago|Asaas) 400.*(tax_id|customer|email|payer|identification)/i,'O intermediador recusou os dados do cliente (CPF ou e-mail). Peça para o cliente conferir os dados.'],
@@ -588,8 +776,8 @@ function renderLog(){
  box.innerHTML=list.length?list.map(e=>{
   const hint=(e.cls==='erro'||e.cls==='aviso')?(LOG_HINTS.find(([r])=>r.test(e.msg))||[])[1]:'';
   return '<div class="logrow '+e.cls+'"><span class="t">'+esc(e.t)+'</span><span class="k '+e.cls+'">'+esc(e.label)+'</span>'
-   +'<div class="m">'+esc(e.msg)+(hint?'<div class="hint">💡 '+esc(hint)+'</div>':'')+'</div></div>'}).join('')
-  :'<div class="logempty">'+(logLines.length?'Nada encontrado com esse filtro.':'Nada por aqui ainda. Mande /start para o seu bot no Telegram e os eventos aparecem aqui.')+'</div>';
+   +'<div class="m">'+esc(e.msg)+(hint?'<div class="loghint">'+I('bulb',14)+'<span>'+esc(hint)+'</span></div>':'')+'</div></div>'}).join('')
+  :blank(logLines.length?'Nada encontrado':'Nenhum evento ainda',logLines.length?'Nenhum evento bate com esse filtro ou busca.':'Mande /start para o seu bot no Telegram e os eventos aparecem aqui.');
  if(atBottom)box.scrollTop=box.scrollHeight; // só desce sozinho se você não estiver lendo mais acima
  box.dataset.ready='1'}
 function setLogFilter(f){logFilter=f;document.querySelectorAll('.chip[data-f]').forEach(c=>c.classList.toggle('on',c.dataset.f===f));renderLog()}
@@ -598,12 +786,13 @@ async function loadLog(){
  try{const l=await api('GET','/api/bots/'+sel+'/log');logLines=Array.isArray(l)?l:[]}catch(e){return}
  renderLog()}
 async function copyLog(){
- try{await navigator.clipboard.writeText(logShown.join('\n'));toast(logShown.length+' linhas copiadas ✓','ok')}
+ try{await navigator.clipboard.writeText(logShown.join('\n'));toast(logShown.length+' linhas copiadas','ok')}
  catch(e){toast('Não consegui copiar. Selecione o texto e use Ctrl+C.','err')}}
 async function clearLog(){
- if(!confirm('Apagar todo o log deste bot?'))return;
+ if(!await modal({title:'Limpar o log?',desc:'Todos os eventos registrados deste bot são apagados. Não dá para desfazer.',ok:'Limpar log',danger:true}))return;
  const j=await api('DELETE','/api/bots/'+sel+'/log');
- if(j.ok){logLines=[];renderLog();toast('Log limpo ✓','ok')}else toast(j.err||'Erro ao limpar','err')}
+ if(j.ok){logLines=[];renderLog();toast('Log limpo','ok')}else toast(j.err||'Erro ao limpar','err')}
 setInterval(()=>{if(sel&&tab==='t_log'&&logAuto)loadLog()},5000);
+paintChrome();
 refresh();
 </script></body></html>
