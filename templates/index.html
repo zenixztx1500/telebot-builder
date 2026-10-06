@@ -92,7 +92,18 @@ input[type=file]{display:none}
 .brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px;font-weight:600;font-size:15px;letter-spacing:-.01em}
 .logo{width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center}
 .side-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px 18px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-.botlist{flex:1;overflow-y:auto;padding:0 10px 10px}
+.botlist{flex:none;max-height:30vh;overflow-y:auto;padding:0 10px 10px}
+/* menu lateral das seções do bot */
+.menu{flex:1;overflow-y:auto;padding:2px 10px 12px;border-top:1px solid var(--border)}
+.menu-title{font-size:11.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;padding:14px 8px 5px}
+.menu-item{display:flex;align-items:center;gap:10px;width:100%;height:34px;padding:0 8px;margin-bottom:1px;border:0;border-radius:var(--r);background:transparent;color:var(--text-2);font-weight:500;font-size:13.5px;text-align:left;transition:background .12s,color .12s}
+.menu-item .ic{color:var(--muted)}
+.menu-item:hover{background:var(--hover);color:var(--text)}
+.menu-item.on{background:var(--accent-soft);color:var(--accent)}
+.menu-item.on .ic{color:var(--accent)}
+.menu-item span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu-item em{font-style:normal;font-size:11.5px;font-weight:500;color:var(--muted);background:var(--hover);border-radius:20px;padding:0 7px;min-width:22px;text-align:center;font-variant-numeric:tabular-nums}
+.menu-item.on em{background:var(--surface);color:var(--accent)}
 .botitem{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px;border-radius:var(--r);border:1px solid transparent;background:transparent;color:inherit;margin-bottom:2px}
 .botitem:hover{background:var(--hover)}
 .botitem.sel{background:var(--accent-soft)}
@@ -110,7 +121,7 @@ input[type=file]{display:none}
 
 /* cabeçalho do bot */
 .pagehead{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
-.pagehead .wrap{display:flex;align-items:center;gap:16px;padding-top:18px;padding-bottom:0;flex-wrap:wrap}
+.pagehead .wrap{display:flex;align-items:center;gap:16px;padding-top:16px;padding-bottom:14px;flex-wrap:wrap}
 .ph-main{flex:1;min-width:220px}
 .nameinput{height:auto;font-size:20px;font-weight:600;letter-spacing:-.015em;border-color:transparent;background:transparent;box-shadow:none;padding:2px 8px;margin-left:-9px}
 .nameinput:hover{border-color:var(--border-2)}
@@ -190,7 +201,9 @@ body.dirty .unsaved{display:inline-flex}
 
 /* log */
 .logbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 20px;border-bottom:1px solid var(--border)}
-.seg{display:inline-flex;border:1px solid var(--border-2);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow-sm)}
+.seg{display:inline-flex;max-width:100%;border:1px solid var(--border-2);border-radius:var(--r);overflow-x:auto;scrollbar-width:none;box-shadow:var(--shadow-sm)}
+.seg::-webkit-scrollbar{display:none}
+.seg .chip{flex:0 0 auto}
 .chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px;border:0;border-left:1px solid var(--border-2);background:var(--surface);color:var(--muted);font-size:13px;font-weight:500}
 .chip:first-child{border-left:0}
 .chip:hover{color:var(--text)}
@@ -247,11 +260,17 @@ body.dirty .unsaved{display:inline-flex}
 @keyframes pop{from{opacity:0;transform:translateY(6px) scale(.98)}}
 
 @media(max-width:900px){
- .app{grid-template-columns:1fr}
- .sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--border)}
+ .app{grid-template-columns:minmax(0,1fr)} /* minmax(0,…): a faixa do menu rola por dentro, sem alargar a página */
+ .sidebar{position:relative;height:auto;min-width:0;border-right:0;border-bottom:1px solid var(--border)}
  .brand{padding:14px 16px 8px}
  .side-head{padding:6px 10px 4px 16px}
- .botlist{display:flex;gap:6px;overflow-x:auto;padding:0 12px 10px;flex:none}
+ .botlist{display:flex;gap:6px;overflow-x:auto;padding:0 12px 10px;flex:none;max-height:none}
+ .menu{display:flex;gap:6px;flex:none;overflow-x:auto;padding:8px 12px;scrollbar-width:none}
+ .menu::-webkit-scrollbar{display:none}
+ .menu-group{display:flex;gap:6px;flex:0 0 auto}
+ .menu-title{display:none}
+ .menu-item{width:auto;flex:0 0 auto;margin:0;padding:0 11px;border:1px solid var(--border)}
+ .menu-item.on{border-color:transparent}
  .botitem{width:auto;flex:0 0 auto;max-width:200px;margin:0;border-color:var(--border)}
  .side-foot{position:absolute;top:10px;right:10px;border:0;padding:0}
  .side-foot .btn span{display:none}
@@ -278,7 +297,8 @@ body.dirty .unsaved{display:inline-flex}
  <aside class="sidebar">
   <div class="brand"><span class="logo" id="logo"></span>TeleBot Builder</div>
   <div class="side-head"><span>Seus bots</span><button class="iconbtn" id="newbtn" onclick="newBot()" title="Novo bot" aria-label="Novo bot"></button></div>
-  <nav id="list" class="botlist"></nav>
+  <nav id="list" class="botlist" aria-label="Seus bots"></nav>
+  <nav id="menu" class="menu" aria-label="Seções do bot"></nav>
   <div class="side-foot">
    <button class="btn ghost sm" id="themebtn" onclick="toggleTheme()" title="Alternar tema claro e escuro"></button>
    <button class="btn ghost sm" id="accbtn" onclick="openAccount()" title="Senha e verificação em duas etapas"></button>
@@ -333,7 +353,17 @@ const ICONS={
 };
 const I=(n,s)=>'<svg class="ic" width="'+(s||16)+'" height="'+(s||16)+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICONS[n]+'</svg>';
 
-const TABS=[['t_cmd','chat','Comandos'],['t_btn','grid','Botões'],['t_prod','box','Produtos'],['t_pay','card','Pagamento'],['t_test','flask','Testar'],['t_auto','zap','Respostas'],['t_filter','shield','Filtros'],['t_perm','sliders','Permissões'],['t_log','list','Log']];
+const TABS=[['t_cmd','chat','Comandos'],['t_btn','grid','Botões'],['t_prod','box','Produtos'],['t_pay','card','Pagamento'],['t_test','flask','Testar pagamento'],['t_auto','zap','Respostas automáticas'],['t_filter','shield','Filtros'],['t_perm','sliders','Permissões e chat'],['t_log','list','Log']];
+const MENU=[['Conteúdo',['t_cmd','t_btn','t_prod','t_auto']],['Vendas',['t_pay','t_test']],['Ajustes',['t_filter','t_perm']],['Acompanhar',['t_log']]]; // grupos do menu lateral
+function renderMenu(){
+ const b=cur(),m=$('menu');
+ if(!b){m.innerHTML='';return}
+ const n={t_cmd:b.commands.length,t_btn:(b.buttons||[]).length,t_prod:(b.products||[]).length,t_auto:b.auto_replies.length,t_filter:b.banned_words.length};
+ const T=Object.fromEntries(TABS.map(t=>[t[0],t]));
+ m.innerHTML=MENU.map(([g,ids])=>'<div class="menu-group"><div class="menu-title">'+g+'</div>'+ids.map(id=>
+  '<button class="menu-item'+(tab===id?' on':'')+'" '+(tab===id?'aria-current="page" ':'')+'onclick="setTab(\''+id+'\')">'+I(T[id][1],16)+'<span>'+T[id][2]+'</span>'
+  +(n[id]?'<em>'+n[id]+'</em>':id==='t_pay'&&b.payment&&b.payment.type?'<i class="dot on" title="Pagamento configurado"></i>':'')+'</button>').join('')+'</div>').join('');
+ const on=m.querySelector('.menu-item.on');if(on&&on.scrollIntoView)on.scrollIntoView({block:'nearest',inline:'nearest'})}
 const ACTION_META={
  '':{label:'Responder com texto',desc:'Envia uma mensagem de texto quando o usuário digitar o comando.'},
  'catalog':{label:'Abrir catálogo',desc:'Mostra os produtos cadastrados na aba Produtos.'},
@@ -690,7 +720,7 @@ function renderEmpty(){
 function renderEditor(){
  const b=cur();
  $('empty').classList.toggle('hide',!!b);$('editor').classList.toggle('hide',!b);
- if(!b){renderEmpty();return}
+ if(!b){renderEmpty();renderMenu();return}
  b.products=b.products||[];b.buttons=b.buttons||[];
  b.payment=b.payment||{type:'',pix_key:'',pix_name:'',instructions:'',qr_image:''};
  $('editor').innerHTML=
@@ -701,7 +731,6 @@ function renderEditor(){
  +'<button class="btn" onclick="toggleEnable()">'+I(b.enabled?'pause':'play',14)+(b.enabled?'Pausar':'Ativar')+'</button>'
  +delBtn('Excluir bot','delBot()')
  +'<button class="btn primary savebtn" onclick="save()">Salvar</button></div>'
- +'<nav class="tabs" role="tablist">'+TABS.map(([id,ic,l])=>'<button class="tab'+(tab===id?' on':'')+'" role="tab" aria-selected="'+(tab===id)+'" onclick="setTab(\''+id+'\')">'+I(ic,15)+l+'</button>').join('')+'</nav>'
  +'</div></header>'
  +'<div class="wrap tabbody">'
  +'<div id="t_cmd">'+tabhead('Comandos','Aparecem no menu "/" do bot no Telegram.','<button class="btn" onclick="add(\'commands\',{cmd:\'\',text:\'\',action:\'\'})">'+I('plus')+'Novo comando</button>')
@@ -735,7 +764,7 @@ function renderEditor(){
  $('editor').querySelectorAll('input:not([type=file]):not([type=checkbox]):not([type=hidden]),textarea').forEach(e=>e.setAttribute('autocomplete','off'));
  setDirty(dirty);
  showTab();
- const on=document.querySelector('.tab.on');if(on&&on.scrollIntoView)on.scrollIntoView({block:'nearest',inline:'nearest'})}
+ renderMenu()}
 function showTab(){TABS.forEach(([id])=>{const e=$(id);if(e)e.classList.toggle('hide',id!==tab)});if(tab==='t_log')loadLog()}
 function setTab(id){collect();tab=id;renderEditor()}
 
