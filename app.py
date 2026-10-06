@@ -528,18 +528,35 @@ def build_app(bot):
 
     custom_markup = ReplyKeyboardMarkup(
         [[kb_button(b) for b in buttons[i:i + per_row]] for i in range(0, len(buttons), per_row)],
-        resize_keyboard=True) if buttons else None
+        resize_keyboard=True, is_persistent=True) if buttons else None
+    if menu_markup:
+        menu_markup = ReplyKeyboardMarkup([menu_row], resize_keyboard=True, is_persistent=True)
     # contato e localização são enviados pelo próprio Telegram ao tocar; os demais chegam como texto
     btn_map = {b["text"].strip(): b for b in buttons if (b.get("action") or "text") not in ("contact", "location")}
     cmd_handlers = {}  # nome do comando -> handler (preenchido no registro, lá embaixo)
+
+    # ---- entrega do menu de botões: não depende do tipo do comando /start ----
+    main_markup = custom_markup or rmarkup or menu_markup
+    kb_seen = set()  # quem já recebeu o menu desde que o bot (re)iniciou
+
+    async def ensure_menu(message, uid, force=False):
+        """Manda o menu de botões numa mensagem própria, uma vez por cliente (ou sempre, no /start)."""
+        if not main_markup or (uid in kb_seen and not force):
+            return
+        kb_seen.add(uid)
+        try:
+            await message.reply_text("Use os botões abaixo para navegar.", reply_markup=main_markup)
+        except Exception as e:
+            log(bid, "WARN", f"menu de botões: {e}")
 
     def make_cmd(name, text):
         async def h(update, ctx):
             if not await allowed(update):
                 await update.message.reply_text("Somente administradores.")
                 return
-            markup = custom_markup or rmarkup or (menu_markup if name == "start" else None)
-            await update.message.reply_text(text, reply_markup=markup)
+            if main_markup:
+                kb_seen.add(update.effective_user.id)
+            await update.message.reply_text(text, reply_markup=main_markup)
             log(bid, "CMD", f"/{name} de {update.effective_user.id}")
         return h
 
@@ -958,8 +975,11 @@ def build_app(bot):
             await msg.reply_text("Somente administradores.")
             return
         if txt in btn_map:
+            kb_seen.add(u.id)  # se tocou num botão, já está com o menu
             await run_button(update, ctx, btn_map[txt])
             return
+        if u.id not in pay_state and txt not in ("🛍 Produtos e Serviços", "🛒 Carrinho", "✅ Finalizar compra"):
+            await ensure_menu(msg, u.id)  # cliente escreveu sem ter o menu (ex.: bot reiniciou): entrega o menu
         if txt == "🛍 Produtos e Serviços":
             await on_catalog(update, ctx)
             return
@@ -1114,12 +1134,23 @@ def build_app(bot):
 
     a = Application.builder().token(bot["token"]).build()
 
-    def reg(name, handler):  # registra o comando e guarda o handler para os botões com a função "Executar comando"
+    def reg(name, handler, carries_menu=False):
+        """Registra o comando e guarda o handler para os botões com a função "Executar comando".
+        Comandos que não são de texto (catálogo, link, imagem...) não conseguem levar o menu de botões na
+        própria resposta; por isso mandam o menu antes, numa mensagem separada."""
         cmd_handlers[name] = handler
-        a.add_handler(CommandHandler(name, handler))
+        if carries_menu:
+            a.add_handler(CommandHandler(name, handler))
+            return
+
+        async def with_menu(update, ctx):
+            if update.message and update.effective_user and await allowed(update):
+                await ensure_menu(update.message, update.effective_user.id, force=(name == "start"))
+            await handler(update, ctx)
+        a.add_handler(CommandHandler(name, with_menu))
 
     for name, text in cmds.items():
-        reg(name, make_cmd(name, text))
+        reg(name, make_cmd(name, text), carries_menu=True)
     for name in cmd_catalog:
         reg(name, on_catalog)
     for name, meta in cmd_image.items():
@@ -1142,7 +1173,7 @@ def build_app(bot):
     a.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     # /start sempre existe: é o que o Telegram envia no botão "Iniciar" e o que mostra o menu de botões
     if "start" not in cmd_handlers:
-        reg("start", make_cmd("start", f"Olá! Eu sou o {bot.get('name') or 'bot'}. Como posso ajudar?"))
+        reg("start", make_cmd("start", f"Olá! Eu sou o {bot.get('name') or 'bot'}. Como posso ajudar?"), carries_menu=True)
     # lista do botão "Menu" do Telegram: todos os comandos (não só os de texto), com /start primeiro
     descr = {n: ("Começar" if n == "start" else f"Comando /{n}") for n in cmds}
     descr.update({n: "Ver produtos" for n in cmd_catalog})
