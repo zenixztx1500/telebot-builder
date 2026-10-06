@@ -1140,7 +1140,22 @@ def build_app(bot):
     a.add_handler(MessageHandler(filters.CONTACT, on_contact))
     a.add_handler(MessageHandler(filters.LOCATION, on_location))
     a.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    cmd_meta = [(n, f"Comando /{n}") for n in cmds]
+    # /start sempre existe: é o que o Telegram envia no botão "Iniciar" e o que mostra o menu de botões
+    if "start" not in cmd_handlers:
+        reg("start", make_cmd("start", f"Olá! Eu sou o {bot.get('name') or 'bot'}. Como posso ajudar?"))
+    # lista do botão "Menu" do Telegram: todos os comandos (não só os de texto), com /start primeiro
+    descr = {n: ("Começar" if n == "start" else f"Comando /{n}") for n in cmds}
+    descr.update({n: "Ver produtos" for n in cmd_catalog})
+    descr.update({n: "Ver imagem" for n in cmd_image})
+    descr.update({n: (m["text"] or "Abrir link")[:60] for n, m in cmd_link.items()})
+    descr.update({n: "Enviar meu contato" for n in cmd_contact})
+    descr.update({n: "Enviar minha localização" for n in cmd_location})
+    descr.update({n: "Finalizar compra" for n in cmd_payment})
+    descr.setdefault("start", "Começar")
+    if products:
+        descr.setdefault("catalogo", "Ver produtos")
+        descr.setdefault("carrinho", "Ver carrinho")
+    cmd_meta = [(n, d) for n, d in sorted(descr.items(), key=lambda x: (x[0] != "start",)) if n in cmd_handlers]
     a.bot_data["cmd_names"] = cmd_meta
     a.bot_data["check_pending"] = check_pending
     return a
