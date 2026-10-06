@@ -180,6 +180,14 @@ body.dirty .unsaved{display:inline-flex}
 .tag button{display:flex;align-items:center;justify-content:center;width:18px;height:18px;border:0;border-radius:50%;background:transparent;color:var(--faint)}
 .tag button:hover{background:var(--bad-bg);color:var(--bad)}
 
+/* botões do menu */
+.presets{display:flex;flex-wrap:wrap;gap:8px}
+.iconbtn:disabled{opacity:.35;cursor:default;background:transparent}
+.phone{max-width:440px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface-2);padding:10px}
+.phone .bar{display:flex;align-items:center;height:34px;padding:0 14px;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--faint);font-size:13px}
+.kbrow{display:flex;gap:6px;margin-top:6px}
+.kbrow span{flex:1;min-width:0;text-align:center;padding:9px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);box-shadow:var(--shadow-sm);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 /* log */
 .logbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 20px;border-bottom:1px solid var(--border)}
 .seg{display:inline-flex;border:1px solid var(--border-2);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow-sm)}
@@ -291,6 +299,9 @@ const api=(m,p,b)=>fetch(p,{method:m,headers:{'Content-Type':'application/json'}
 // ---------- ícones (traço, 24x24) ----------
 const ICONS={
  plus:'<path d="M12 5v14M5 12h14"/>',
+ grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+ up:'<path d="m18 15-6-6-6 6"/>',
+ down:'<path d="m6 9 6 6 6-6"/>',
  x:'<path d="M18 6 6 18M6 6l12 12"/>',
  trash:'<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>',
  search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
@@ -319,7 +330,7 @@ const ICONS={
 };
 const I=(n,s)=>'<svg class="ic" width="'+(s||16)+'" height="'+(s||16)+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICONS[n]+'</svg>';
 
-const TABS=[['t_cmd','chat','Comandos'],['t_prod','box','Produtos'],['t_pay','card','Pagamento'],['t_test','flask','Testar'],['t_auto','zap','Respostas'],['t_filter','shield','Filtros'],['t_perm','sliders','Permissões'],['t_log','list','Log']];
+const TABS=[['t_cmd','chat','Comandos'],['t_btn','grid','Botões'],['t_prod','box','Produtos'],['t_pay','card','Pagamento'],['t_test','flask','Testar'],['t_auto','zap','Respostas'],['t_filter','shield','Filtros'],['t_perm','sliders','Permissões'],['t_log','list','Log']];
 const ACTION_META={
  '':{label:'Responder com texto',desc:'Envia uma mensagem de texto quando o usuário digitar o comando.'},
  'catalog':{label:'Abrir catálogo',desc:'Mostra os produtos cadastrados na aba Produtos.'},
@@ -339,6 +350,18 @@ const GATEWAY_META={ // a ordem aqui é a ordem da lista no painel
  asaas:{label:'Asaas',hasEnv:true,tokenLabel:'Chave de API do Asaas',
   about:'Pix pela API com conta de pessoa física ou empresa. Tem ambiente Sandbox separado para testes (conta criada em sandbox.asaas.com).',
   where:'Onde pegar: no Asaas, Menu do usuário → Integrações → Chave de API → Gerar nova chave (começa com $aact_).'}
+};
+const BUTTON_META={ // funções prontas dos botões do menu; "text" é o rótulo sugerido ao adicionar
+ catalog:{label:'Abrir catálogo',text:'🛍 Produtos',desc:'Mostra as categorias e os produtos cadastrados.'},
+ cart:{label:'Ver carrinho',text:'🛒 Carrinho',desc:'Mostra os itens do carrinho, o total e a opção de finalizar.'},
+ checkout:{label:'Finalizar compra',text:'✅ Finalizar compra',desc:'Gera o pagamento do carrinho, conforme a aba Pagamento.'},
+ clearcart:{label:'Esvaziar carrinho',text:'🗑 Esvaziar carrinho',desc:'Remove todos os itens do carrinho do cliente.'},
+ text:{label:'Enviar mensagem',text:'ℹ️ Informações',desc:'O bot responde com o texto que você escrever.',val:{area:true,ph:'Texto que o bot envia'}},
+ link:{label:'Abrir link',text:'🌐 Nosso site',desc:'Envia um botão que abre o endereço informado.',val:{ph:'https://exemplo.com'}},
+ support:{label:'Falar com o vendedor',text:'💬 Falar com o vendedor',desc:'Abre uma conversa com você. Informe o seu @usuário do Telegram; em branco, usa o seu ID da aba Pagamento.',val:{ph:'@seu_usuario'}},
+ contact:{label:'Pedir contato',text:'📞 Enviar meu contato',desc:'O cliente compartilha o telefone com um toque. O número aparece no Log.'},
+ location:{label:'Pedir localização',text:'📍 Enviar localização',desc:'O cliente compartilha a localização com um toque. Ela aparece no Log.'},
+ command:{label:'Executar comando',text:'▶️ Começar',desc:'Faz o mesmo que um comando da aba Comandos.',val:{cmd:true}}
 };
 const MODE_META={
  'contains':{label:'Contém',desc:'Dispara quando a mensagem contém essa palavra ou frase em qualquer parte do texto.'},
@@ -443,6 +466,50 @@ function cmdRows(b){
    +(extra?'<div class="extra">'+extra+'</div>':'')
    +'<small class="help">'+ACTION_META[act].desc+'</small></div>'
  }).join('')}
+
+// ---------- botões do menu ----------
+function kbRows(b){ // pré-visualização do menu, nas mesmas linhas que o Telegram vai mostrar
+ const n=Math.min(3,Math.max(1,parseInt(b.buttons_per_row,10)||2)),bs=b.buttons.filter(x=>(x.text||'').trim());
+ let h='';for(let i=0;i<bs.length;i+=n)h+='<div class="kbrow">'+bs.slice(i,i+n).map(x=>'<span>'+esc(x.text)+'</span>').join('')+'</div>';
+ return h||'<div class="kbrow"><span style="color:var(--faint)">Dê um texto aos botões para ver o menu</span></div>'}
+function btnBlock(b){
+ const cols=Math.min(3,Math.max(1,parseInt(b.buttons_per_row,10)||2));
+ const cmds=b.commands.map(c=>c.cmd).filter(Boolean);
+ const list=b.buttons.length?b.buttons.map((x,i)=>{
+  const act=BUTTON_META[x.action]?x.action:'text',M=BUTTON_META[act];
+  let val='';
+  if(M.val&&M.val.cmd)val='<select data-l="buttons" data-i="'+i+'" data-f="value">'+(cmds.length?cmds.map(c=>'<option value="'+esc(c)+'"'+(x.value===c?' selected':'')+'>/'+esc(c)+'</option>').join(''):'<option value="">Crie um comando na aba Comandos primeiro</option>')+'</select>';
+  else if(M.val&&M.val.area)val='<textarea rows="2" data-l="buttons" data-i="'+i+'" data-f="value" placeholder="'+M.val.ph+'">'+esc(x.value)+'</textarea>';
+  else if(M.val)val='<input data-l="buttons" data-i="'+i+'" data-f="value" value="'+esc(x.value)+'" placeholder="'+M.val.ph+'" spellcheck="false">';
+  return '<div class="item"><div class="inline wrapsm">'
+   +'<input data-l="buttons" data-i="'+i+'" data-f="text" value="'+esc(x.text)+'" maxlength="40" placeholder="Texto do botão">'
+   +'<select onchange="btnAction('+i+',this.value)">'+Object.entries(BUTTON_META).map(([k,m])=>'<option value="'+k+'"'+(act===k?' selected':'')+'>'+m.label+'</option>').join('')+'</select>'
+   +'<button class="iconbtn" type="button" title="Mover para cima" aria-label="Mover para cima" '+(i?'':'disabled')+' onclick="mv(\'buttons\','+i+',-1)">'+I('up')+'</button>'
+   +'<button class="iconbtn" type="button" title="Mover para baixo" aria-label="Mover para baixo" '+(i<b.buttons.length-1?'':'disabled')+' onclick="mv(\'buttons\','+i+',1)">'+I('down')+'</button>'
+   +delBtn('Remover botão','rm(\'buttons\','+i+')')+'</div>'
+   +(val?'<div class="extra">'+val+'</div>':'')
+   +'<small class="help">'+M.desc+'</small></div>'}).join('')
+  :blank('Nenhum botão personalizado','Sem botões aqui, o bot mostra o menu padrão (Produtos, Carrinho e Finalizar compra) quando há produtos cadastrados.');
+ return tabhead('Botões','Menu que fica embaixo do campo de mensagem no Telegram. Cada botão executa uma função pronta.','<button class="btn" onclick="addButton(\'text\')">'+I('plus')+'Novo botão</button>')
+  +'<section class="card"><div class="card-head"><div><h2>Funções prontas</h2><p>Clique para incluir um botão já configurado. Depois é só ajustar o texto.</p></div></div>'
+  +'<div class="card-body"><div class="presets">'+Object.entries(BUTTON_META).map(([k,m])=>'<button class="btn sm" type="button" onclick="addButton(\''+k+'\')">'+I('plus',13)+m.label+'</button>').join('')+'</div></div></section>'
+  +'<section class="card"><div class="card-head"><h2>Seus botões<span class="count">'+b.buttons.length+'</span></h2></div>'+list+'</section>'
+  +(b.buttons.length?'<section class="card"><div class="card-head"><div><h2>Como aparece no chat</h2><p>Os clientes veem o menu novo depois de enviar /start de novo.</p></div>'
+   +'<select id="btn_cols" style="width:170px" onchange="collect();renderEditor()">'+[1,2,3].map(n=>'<option value="'+n+'"'+(cols===n?' selected':'')+'>'+n+(n>1?' botões por linha':' botão por linha')+'</option>').join('')+'</select></div>'
+   +'<div class="card-body"><div class="phone"><div class="bar">Mensagem</div><div id="kbprev">'+kbRows(b)+'</div></div></div></section>':'')}
+function addButton(k){
+ if(!collect())return;const b=cur();
+ b.buttons.push({text:BUTTON_META[k].text,action:k,value:k==='command'?((b.commands[0]||{}).cmd||''):''});
+ setDirty(true);renderEditor();
+ const f=document.querySelector('[data-l="buttons"][data-i="'+(b.buttons.length-1)+'"][data-f="text"]');if(f){f.focus();f.select()}}
+function btnAction(i,k){ // trocar a função zera o valor (um link não serve de texto, e vice-versa)
+ if(!collect())return;const b=cur(),x=b.buttons[i];
+ x.action=k;x.value=k==='command'?((b.commands[0]||{}).cmd||''):'';
+ setDirty(true);renderEditor()}
+function mv(list,i,d){
+ if(!collect())return;const a=cur()[list],j=i+d;
+ if(j<0||j>=a.length)return;
+ [a[i],a[j]]=[a[j],a[i]];setDirty(true);renderEditor()}
 
 async function uploadImage(input,apply){
  if(!input.files||!input.files[0])return;
@@ -580,7 +647,7 @@ function renderEditor(){
  const b=cur();
  $('empty').classList.toggle('hide',!!b);$('editor').classList.toggle('hide',!b);
  if(!b){renderEmpty();return}
- b.products=b.products||[];
+ b.products=b.products||[];b.buttons=b.buttons||[];
  b.payment=b.payment||{type:'',pix_key:'',pix_name:'',instructions:'',qr_image:''};
  $('editor').innerHTML=
  '<header class="pagehead"><div class="wrap">'
@@ -595,6 +662,7 @@ function renderEditor(){
  +'<div class="wrap tabbody">'
  +'<div id="t_cmd">'+tabhead('Comandos','Aparecem no menu "/" do bot no Telegram.','<button class="btn" onclick="add(\'commands\',{cmd:\'\',text:\'\',action:\'\'})">'+I('plus')+'Novo comando</button>')
  +'<section class="card">'+cmdRows(b)+'</section></div>'
+ +'<div id="t_btn">'+btnBlock(b)+'</div>'
  +'<div id="t_prod">'+tabhead('Produtos','Organize por categoria. Cada categoria vira um catálogo que o cliente escolhe no bot.',b.products.length?'<button class="btn" onclick="newCategory()">'+I('plus')+'Nova categoria</button>':'')
  +prodCatalogHTML(b)+'</div>'
  +'<div id="t_pay">'+payBlock(b)+'</div>'
@@ -633,6 +701,7 @@ function collect(){ // lê os campos da tela para o objeto local
  document.querySelectorAll('[data-l]').forEach(e=>{let v=e.value;if(e.dataset.f==='cmd')v=v.replace(/^\//,'').toLowerCase();b[e.dataset.l][e.dataset.i][e.dataset.f]=v});
  b.admin_only=$('admin_only').checked;
  if($('auto_clean'))b.auto_clean=$('auto_clean').checked;
+ if($('btn_cols'))b.buttons_per_row=parseInt($('btn_cols').value,10)||2;
  b.whitelist=$('whitelist').value.split(',').map(s=>parseInt(s.trim(),10)).filter(x=>!isNaN(x));
  if($('pay_type')){
   b.payment=b.payment||{};
@@ -657,21 +726,32 @@ function rmBan(i){if(!collect())return;cur().banned_words.splice(i,1);setDirty(t
 
 let dirty=false;
 function setDirty(v){dirty=v;document.body.classList.toggle('dirty',v);document.querySelectorAll('.savebtn').forEach(x=>{x.disabled=false;x.textContent='Salvar'})}
-function validate(b){ // devolve [mensagem, índice, campo] do primeiro produto com problema, ou null
+function validate(b){ // devolve [mensagem, aba, lista, índice, campo] do primeiro problema, ou null
  for(let i=0;i<b.products.length;i++){
   const p=b.products[i];
-  if(!(p.name||'').trim())return['Um produto está sem nome (categoria "'+((p.category||'').trim()||'Geral')+'").',i,'name'];
+  if(!(p.name||'').trim())return['Um produto está sem nome (categoria "'+((p.category||'').trim()||'Geral')+'").','t_prod','products',i,'name'];
   const v=parsePrice(p.price);
-  if(!(v>0))return['Preço inválido em "'+p.name+'". Use por exemplo 19,90.',i,'price'];
+  if(!(v>0))return['Preço inválido em "'+p.name+'". Use por exemplo 19,90.','t_prod','products',i,'price'];
   p.price=fmtPrice(v);
+ }
+ const vistos=new Set();
+ for(let i=0;i<(b.buttons||[]).length;i++){
+  const x=b.buttons[i],t=(x.text||'').trim(),v=(x.value||'').trim();
+  if(!t)return['Um botão está sem texto.','t_btn','buttons',i,'text'];
+  if(vistos.has(t))return['Dois botões têm o mesmo texto: "'+t+'". Cada botão precisa de um texto diferente.','t_btn','buttons',i,'text'];
+  vistos.add(t);
+  if(x.action==='text'&&!v)return['Escreva a mensagem do botão "'+t+'".','t_btn','buttons',i,'value'];
+  if(x.action==='link'&&!/^https?:\/\//i.test(v))return['O link do botão "'+t+'" precisa começar com https://','t_btn','buttons',i,'value'];
+  if(x.action==='support'&&v&&!/^(@[\w]{3,}|https?:\/\/)/i.test(v))return['No botão "'+t+'", informe o seu @usuário do Telegram ou um link.','t_btn','buttons',i,'value'];
+  if(x.action==='command'&&!v)return['Escolha o comando do botão "'+t+'".','t_btn','buttons',i,'value'];
  }
  return null}
 async function save(){
  if(!collect())return;const b=cur();
  const bad=validate(b);
  if(bad){
-  const [msg,i,f]=bad;tab='t_prod';renderEditor();
-  const el=document.querySelector('[data-l="products"][data-i="'+i+'"][data-f="'+f+'"]');
+  const [msg,aba,lista,i,f]=bad;tab=aba;renderEditor();
+  const el=document.querySelector('[data-l="'+lista+'"][data-i="'+i+'"][data-f="'+f+'"]');
   if(el){el.classList.add('invalid');el.focus()}
   toast(msg,'err');return}
  const btns=[...document.querySelectorAll('.savebtn')];btns.forEach(x=>{x.disabled=true;x.textContent='Salvando...'});
@@ -686,6 +766,7 @@ async function testToken(btn){
  btn.disabled=false;btn.textContent='Testar token';
  toast(j.ok?j.msg+' Agora clique em Salvar.':j.err,j.ok?'ok':'err')}
 document.addEventListener('input',e=>{if(e.target.closest('#editor')&&!e.target.closest('#t_log')&&!e.target.closest('#t_test')&&e.target.type!=='file')setDirty(true)});
+document.addEventListener('input',e=>{if(e.target.closest('#t_btn')&&$('kbprev')){collect();$('kbprev').innerHTML=kbRows(cur())}}); // pré-visualização do menu ao digitar
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&cur()){e.preventDefault();save()}});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
 async function toggleEnable(){
@@ -754,7 +835,7 @@ function copyTrial(){navigator.clipboard.writeText($('trial_copia').value).then(
 // ---------- Log ----------
 const LOG_KIND={ERR:['erro','Erro'],WARN:['aviso','Aviso'],SYS:['sys','Sistema'],PAGO:['venda','Pago'],PIX:['venda','Pix gerado'],
  COMPRA:['venda','Compra'],CARRINHO:['venda','Carrinho'],CMD:['msg','Comando'],CATALOGO:['msg','Catálogo'],AUTO:['msg','Resposta auto'],
- TEXT:['msg','Mensagem'],CALLBACK:['msg','Botão'],CONTATO:['msg','Contato'],LOCALIZACAO:['msg','Localização'],FILTRO:['aviso','Filtro']};
+ TEXT:['msg','Mensagem'],CALLBACK:['msg','Botão'],BOTAO:['msg','Botão do menu'],CONTATO:['msg','Contato'],LOCALIZACAO:['msg','Localização'],FILTRO:['aviso','Filtro']};
 const LOG_FILTERS=[['all','Todos'],['erro','Erros'],['venda','Vendas'],['msg','Mensagens'],['sys','Sistema']];
 const LOG_HINTS=[ // [padrão, explicação] — a primeira que casar aparece embaixo do erro
  [/whitelist access required/i,'O PagBank ainda não liberou a API de Pix em produção para a sua conta. Peça a "liberação da API Orders com Pix em produção" ao suporte do PagBank. Enquanto isso, use outro intermediador ou o Pix com valor exato.'],

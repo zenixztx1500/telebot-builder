@@ -35,6 +35,10 @@ Na aba **Pagamento**, escolha "Atendimento automático (API de pagamento)" e o i
 
 A aba **🧪 Testar pagamento** gera um Pix de R$ 1,00 com a configuração salva, mostra o QR Code no próprio painel e confere sozinha se ele foi pago — sem passar pelo Telegram.
 
+## Botões do menu
+Na aba **Botões** você monta o menu que fica embaixo do campo de mensagem no Telegram. Cada botão tem uma função pronta: abrir catálogo, ver carrinho, finalizar compra, esvaziar carrinho, enviar mensagem, abrir link, falar com o vendedor, pedir contato, pedir localização ou executar um comando da aba Comandos.
+Escolha quantos botões por linha (1 a 3) e veja a pré-visualização. Sem botões cadastrados, o bot usa o menu padrão (Produtos, Carrinho, Finalizar compra). Os clientes veem o menu novo depois de enviar /start de novo.
+
 ## Chat limpo
 Em **Permissões e chat**, a opção "Chat limpo" (ligada por padrão) faz o bot apagar as mensagens já usadas depois de cada escolha do cliente: catálogo anterior, carrinho, perguntas respondidas e as respostas com nome, CPF e e-mail. O QR Code e o copia e cola somem quando o pagamento é confirmado. O Telegram só permite apagar mensagens com menos de 48 horas.
 

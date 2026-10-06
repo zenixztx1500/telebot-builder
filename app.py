@@ -24,7 +24,8 @@ IMG_DIR.mkdir(parents=True, exist_ok=True)
 LOCK = threading.RLock()
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-EDITABLE = ("name", "commands", "auto_replies", "inline_keyboards", "reply_keyboard", "auto_clean",
+BUTTON_ACTIONS = ("catalog", "cart", "checkout", "clearcart", "text", "link", "support", "contact", "location", "command")
+EDITABLE = ("name", "commands", "auto_replies", "inline_keyboards", "reply_keyboard", "auto_clean", "buttons", "buttons_per_row",
             "banned_words", "admin_only", "whitelist", "enabled", "products", "payment")
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 IMG_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
@@ -510,12 +511,34 @@ def build_app(bot):
         menu_row.append("✅ Finalizar compra")
     menu_markup = ReplyKeyboardMarkup([menu_row], resize_keyboard=True) if menu_row else None
 
+    # ---- botões personalizados (aba Botões do painel): substituem o menu padrão acima ----
+    buttons = [b for b in (bot.get("buttons") or []) if (b.get("text") or "").strip()]
+    try:
+        per_row = min(3, max(1, int(bot.get("buttons_per_row") or 2)))
+    except (TypeError, ValueError):
+        per_row = 2
+
+    def kb_button(b):
+        act, text = b.get("action") or "text", b["text"].strip()
+        if act == "contact":
+            return KeyboardButton(text, request_contact=True)
+        if act == "location":
+            return KeyboardButton(text, request_location=True)
+        return KeyboardButton(text)
+
+    custom_markup = ReplyKeyboardMarkup(
+        [[kb_button(b) for b in buttons[i:i + per_row]] for i in range(0, len(buttons), per_row)],
+        resize_keyboard=True) if buttons else None
+    # contato e localização são enviados pelo próprio Telegram ao tocar; os demais chegam como texto
+    btn_map = {b["text"].strip(): b for b in buttons if (b.get("action") or "text") not in ("contact", "location")}
+    cmd_handlers = {}  # nome do comando -> handler (preenchido no registro, lá embaixo)
+
     def make_cmd(name, text):
         async def h(update, ctx):
             if not await allowed(update):
                 await update.message.reply_text("Somente administradores.")
                 return
-            markup = rmarkup if rmarkup else (menu_markup if name == "start" else None)
+            markup = custom_markup or rmarkup or (menu_markup if name == "start" else None)
             await update.message.reply_text(text, reply_markup=markup)
             log(bid, "CMD", f"/{name} de {update.effective_user.id}")
         return h
@@ -888,6 +911,44 @@ def build_app(bot):
         log(bid, "LOCALIZACAO", f"{update.effective_user.id}: {l.latitude},{l.longitude}")
         await update.message.reply_text("Localização recebida, obrigado!")
 
+    async def run_button(update, ctx, btn):
+        """Executa a função predefinida de um botão do menu (aba Botões do painel)."""
+        msg, u = update.message, update.effective_user
+        act, val = btn.get("action") or "text", (btn.get("value") or "").strip()
+        log(bid, "BOTAO", f"{u.id}: {btn['text'].strip()}")
+        if act == "catalog":
+            await on_catalog(update, ctx)
+        elif act == "cart":
+            await on_cart(update, ctx)
+        elif act == "command":
+            handler = cmd_handlers.get(val.lstrip("/").lower())
+            if handler:
+                await handler(update, ctx)
+            else:
+                track(await msg.reply_text("Esse botão ainda não foi configurado."))
+        else:
+            await clean(ctx.bot, msg.chat_id, msg)  # some o toque do cliente e a resposta do botão anterior
+            if act == "checkout":
+                await do_checkout(msg, u)
+            elif act == "clearcart":
+                carts[u.id] = []
+                track(await msg.reply_text("Carrinho esvaziado."))
+            elif act in ("link", "support"):
+                url = val
+                if act == "support":
+                    if val.startswith("@"):
+                        url = "https://t.me/" + val[1:]
+                    elif not val and admin_id:
+                        url = f"tg://user?id={admin_id}"
+                if re.match(r"^(https?://|tg://)", url):
+                    texto = "Toque abaixo para falar com o vendedor." if act == "support" else "Toque abaixo para abrir."
+                    rotulo = "Abrir conversa" if act == "support" else "Abrir link"
+                    track(await msg.reply_text(texto, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(rotulo, url=url)]])))
+                else:
+                    track(await msg.reply_text("Esse botão ainda não foi configurado."))
+            else:  # text
+                track(await msg.reply_text(val or "..."))
+
     async def on_text(update, ctx):
         msg, u = update.message, update.effective_user
         txt = (msg.text or "").strip() if msg else ""
@@ -895,6 +956,9 @@ def build_app(bot):
             return
         if not await allowed(update):
             await msg.reply_text("Somente administradores.")
+            return
+        if txt in btn_map:
+            await run_button(update, ctx, btn_map[txt])
             return
         if txt == "🛍 Produtos e Serviços":
             await on_catalog(update, ctx)
@@ -920,7 +984,7 @@ def build_app(bot):
             m = r["match"].strip().lower()
             if not ((low == m) if r.get("mode") == "exact" else (m in low)):
                 continue
-            markup = rmarkup
+            markup = custom_markup or rmarkup
             for ik in inline:
                 if (ik.get("trigger") or "").strip().lower() == m:
                     markup = InlineKeyboardMarkup([[InlineKeyboardButton(b["text"], callback_data=b["callback"])
@@ -1049,24 +1113,29 @@ def build_app(bot):
             await q.message.reply_text(cb_map[data])
 
     a = Application.builder().token(bot["token"]).build()
+
+    def reg(name, handler):  # registra o comando e guarda o handler para os botões com a função "Executar comando"
+        cmd_handlers[name] = handler
+        a.add_handler(CommandHandler(name, handler))
+
     for name, text in cmds.items():
-        a.add_handler(CommandHandler(name, make_cmd(name, text)))
+        reg(name, make_cmd(name, text))
     for name in cmd_catalog:
-        a.add_handler(CommandHandler(name, on_catalog))
+        reg(name, on_catalog)
     for name, meta in cmd_image.items():
-        a.add_handler(CommandHandler(name, make_cmd_image(name, meta["image"], meta["text"])))
+        reg(name, make_cmd_image(name, meta["image"], meta["text"]))
     for name, meta in cmd_link.items():
-        a.add_handler(CommandHandler(name, make_cmd_link(name, meta["url"], meta["text"])))
+        reg(name, make_cmd_link(name, meta["url"], meta["text"]))
     for name in cmd_contact:
-        a.add_handler(CommandHandler(name, make_cmd_contact(name)))
+        reg(name, make_cmd_contact(name))
     for name in cmd_location:
-        a.add_handler(CommandHandler(name, make_cmd_location(name)))
+        reg(name, make_cmd_location(name))
     for name in cmd_payment:
-        a.add_handler(CommandHandler(name, make_cmd_payment(name, payment)))
+        reg(name, make_cmd_payment(name, payment))
     if "catalogo" not in cmds and "catalogo" not in cmd_catalog:
-        a.add_handler(CommandHandler("catalogo", on_catalog))
+        reg("catalogo", on_catalog)
     if "carrinho" not in cmds:
-        a.add_handler(CommandHandler("carrinho", on_cart))
+        reg("carrinho", on_cart)
     a.add_handler(CallbackQueryHandler(on_callback))
     a.add_handler(MessageHandler(filters.CONTACT, on_contact))
     a.add_handler(MessageHandler(filters.LOCATION, on_location))
@@ -1302,6 +1371,15 @@ def api_update(bid):
             if k in body:
                 b[k] = body[k]
         b["whitelist"] = [int(x) for x in b.get("whitelist", []) if str(x).lstrip("-").isdigit()]
+        # botões do menu: só texto não vazio, função conhecida, no máximo 24
+        b["buttons"] = [{"text": str(x.get("text") or "").strip()[:40],
+                         "action": x.get("action") if x.get("action") in BUTTON_ACTIONS else "text",
+                         "value": str(x.get("value") or "").strip()[:1000]}
+                        for x in (b.get("buttons") or []) if isinstance(x, dict) and str(x.get("text") or "").strip()][:24]
+        try:
+            b["buttons_per_row"] = min(3, max(1, int(b.get("buttons_per_row") or 2)))
+        except (TypeError, ValueError):
+            b["buttons_per_row"] = 2
         save_bots(uid, bots)
     start_worker(uid, bid)  # reinicia se estiver ativo; se pausado, só para
     return jsonify(ok=True, warn=warn)
